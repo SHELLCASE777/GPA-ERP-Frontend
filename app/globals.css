@@ -1,0 +1,93 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── CSS Custom Properties ─────────────────────────────────────────────────── */
+:root {
+  --gpa-primary: #1E40AF;
+  --gpa-accent: #F59E0B;
+  --gpa-canvas: #F0EFEA;
+  --gpa-sidebar: #111827;
+  --sidebar-width: 220px;
+  --topbar-height: 56px;
+}
+
+/* ── Base ───────────────────────────────────────────────────────────────────── */
+* { box-sizing: border-box; }
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background-color: var(--gpa-canvas);
+  color: #111827;
+  font-feature-settings: "rlig" 1, "calt" 1;
+}
+
+/* ── Scrollbar ──────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #D1D5DB; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #9CA3AF; }
+
+/* ── Numeric font utility ───────────────────────────────────────────────────── */
+.tabular-nums { font-variant-numeric: tabular-nums; }
+
+/* ── Shimmer skeleton ───────────────────────────────────────────────────────── */
+.skeleton {
+  background: linear-gradient(90deg, #E5E7EB 25%, #F3F4F6 50%, #E5E7EB 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* ── Prose numbers ──────────────────────────────────────────────────────────── */
+.num {
+  font-family: var(--font-roboto-mono), "JetBrains Mono", monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Sidebar item active accent border ─────────────────────────────────────── */
+.nav-active {
+  position: relative;
+  background-color: #1F2937;
+  color: #FFFFFF;
+}
+.nav-active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--gpa-accent);
+  border-radius: 0 2px 2px 0;
+}
+
+/* ── Burn-rate bar colors ───────────────────────────────────────────────────── */
+.bar-ok      { background-color: #16A34A; }
+.bar-caution { background-color: #D97706; }
+.bar-critical { background-color: #DC2626; }
+
+/* ── Modal backdrop ─────────────────────────────────────────────────────────── */
+.modal-backdrop {
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+/* ── Focus ring (consistent) ────────────────────────────────────────────────── */
+.focus-ring:focus {
+  outline: none;
+  ring: 2px;
+  ring-offset: 2px;
+  ring-color: var(--gpa-primary);
+}
+
+/* ── Table helpers ──────────────────────────────────────────────────────────── */
+.th { @apply text-[10px] font-semibold tracking-widest text-gray-400 uppercase px-4 py-3 text-left; }
+.td { @apply px-4 py-3 text-sm text-gray-700 whitespace-nowrap; }
+
+/* ── Status row highlight (critical items) ──────────────────────────────────── */
+tr.row-critical { background-color: #FEF2F2; }
+tr.row-low      { background-color: #FFFBEB; }
