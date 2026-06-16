@@ -285,6 +285,8 @@ export const usersApi = {
     api.patch<{ message: string }>("/users/me/password", data),
   update: (id: number, data: { role_id?: number; is_active?: boolean; full_name?: string }) =>
     api.patch<User>(`/users/${id}`, data),
+  resetPassword: (id: number) =>
+    api.post<{ message: string; temp_password: string }>(`/users/${id}/reset-password`),
 };
 
 // ─── Notifications ────────────────────────────────────────────────────────────

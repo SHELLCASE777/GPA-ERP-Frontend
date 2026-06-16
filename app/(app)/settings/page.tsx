@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   User, Lock, Users, Shield, Eye, EyeOff,
   Plus, CheckCircle2, XCircle, SlidersHorizontal,
-  ChevronRight, Trash2, X, Check, Pencil, Mail,
+  ChevronRight, Trash2, X, Check, Pencil, Mail, KeyRound, Copy,
 } from "lucide-react";
 import { useAuth, useRole } from "@/lib/auth-context";
 import { usersApi, vaultApi, costCodesApi, costCentresApi, legalApi } from "@/lib/api";
@@ -446,6 +446,7 @@ function UsersTab() {
   const [toast,      setToast]    = useState<{ msg: string; ok: boolean } | null>(null);
   const [showForm,   setShowForm] = useState(false);
   const [editingUser, setEditingUser] = useState<UserType | null>(null);
+  const [resetResult, setResetResult] = useState<{ name: string; password: string } | null>(null);
   const [newUser,    setNewUser]  = useState<UserCreate>({
     email: "", password: "", full_name: "", role_id: 3,
   });
@@ -488,6 +489,15 @@ function UsersTab() {
     onError: (e) => showToast(getErrorMessage(e), false),
   });
 
+  const resetPassword = useMutation({
+    mutationFn: (id: number) => usersApi.resetPassword(id).then((r) => r.data),
+    onSuccess: (data, id) => {
+      const u = users.find((x) => x.id === id);
+      setResetResult({ name: u?.full_name ?? "User", password: data.temp_password });
+    },
+    onError: (e) => showToast(getErrorMessage(e), false),
+  });
+
   const createUser = useMutation({
     mutationFn: () => usersApi.create(newUser),
     onSuccess: () => {
@@ -520,6 +530,35 @@ function UsersTab() {
             editUser.mutate({ id: editingUser.id, data: payload });
           }}
         />
+      )}
+
+      {/* Temp password result modal */}
+      {resetResult && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setResetResult(null)}>
+          <div className="bg-white rounded-xl shadow-xl max-w-sm w-full p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 mb-3">
+              <KeyRound size={16} className="text-primary" />
+              <h3 className="text-sm font-semibold text-gray-900">Password Reset</h3>
+            </div>
+            <p className="text-xs text-gray-500 mb-3">
+              Temporary password for <span className="font-medium text-gray-900">{resetResult.name}</span>.
+              They&apos;ll be asked to change it on next login. Share it securely — it won&apos;t be shown again.
+            </p>
+            <div className="flex items-center gap-2 rounded-lg bg-gray-50 border border-gray-200 p-2.5 mb-4">
+              <code className="flex-1 text-sm font-mono text-gray-900 select-all break-all">{resetResult.password}</code>
+              <button
+                onClick={() => { navigator.clipboard?.writeText(resetResult.password); showToast("Copied", true); }}
+                className="text-gray-400 hover:text-gray-700 transition-colors shrink-0"
+                title="Copy"
+              >
+                <Copy size={14} />
+              </button>
+            </div>
+            <div className="flex justify-end">
+              <Button size="sm" onClick={() => setResetResult(null)}>Done</Button>
+            </div>
+          </div>
+        </div>
       )}
 
       <div className="flex items-center justify-between">
@@ -654,6 +693,18 @@ function UsersTab() {
                         >
                           <Pencil size={11} />
                           Edit
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (confirm(`Reset password for ${u.full_name}? A new temporary password will be generated.`))
+                              resetPassword.mutate(u.id);
+                          }}
+                          disabled={resetPassword.isPending}
+                          className="inline-flex items-center gap-1 text-[11px] text-gray-500 hover:text-primary font-medium transition-colors disabled:opacity-50"
+                          title="Reset password"
+                        >
+                          <KeyRound size={11} />
+                          Reset PW
                         </button>
                         {u.is_active && (
                           <button

@@ -7,6 +7,7 @@ import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
 import NewExpenseModal from "@/components/spending/new-expense-modal";
 import { CommandPalette } from "@/components/command-palette";
+import { ForcePasswordChange } from "@/components/auth/force-password-change";
 import Link from "next/link";
 import {
   LayoutDashboard, Receipt, CheckSquare, Settings,
@@ -164,6 +165,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
       <NewExpenseModal open={expenseOpen} onClose={() => setExpenseOpen(false)} />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      <ForcePasswordChange />
     </div>
   );
 }

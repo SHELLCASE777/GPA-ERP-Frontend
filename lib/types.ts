@@ -15,6 +15,7 @@ export interface User {
   is_active: boolean;
   role: Role;
   created_at: string;
+  must_change_password?: boolean;
 }
 
 export interface TokenResponse {
