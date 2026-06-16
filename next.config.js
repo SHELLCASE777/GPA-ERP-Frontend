@@ -1,5 +1,23 @@
 /** @type {import('next').NextConfig} */
 
+// Derive allowed API origin from the baked-in env var so the CSP works on
+// Railway (https://...) without hardcoding the LAN IP.
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8002/api";
+const API_ORIGIN = API_URL.replace(/\/api\/?$/, ""); // strip trailing /api
+// PWA Note: To enable full service-worker support, install `next-pwa` and wrap
+// the config below with:
+//
+//   const withPWA = require('next-pwa')({
+//     dest: 'public',
+//     disable: process.env.NODE_ENV === 'development',
+//     register: true,
+//     skipWaiting: true,
+//   });
+//   module.exports = withPWA({ ...nextConfig });
+//
+// The manifest.json + meta tags in layout.tsx already provide basic PWA
+// installability on Chrome/Edge/Safari without a service worker.
+
 const securityHeaders = [
   {
     key: 'X-DNS-Prefetch-Control',
@@ -19,7 +37,7 @@ const securityHeaders = [
   },
   {
     key: 'Permissions-Policy',
-    value: 'camera=(), microphone=(), geolocation=()',
+    value: 'camera=(self), microphone=(), geolocation=(self)',
   },
   {
     key: 'Content-Security-Policy',
@@ -27,9 +45,10 @@ const securityHeaders = [
       "default-src 'self'",
       "script-src 'self' 'unsafe-inline' 'unsafe-eval'", // unsafe-eval needed by Next.js dev; tighten in prod
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-      "img-src 'self' data: blob: http://localhost:8002",
+      "img-src 'self' data: blob:",
       "font-src 'self' https://fonts.gstatic.com",
-      "connect-src 'self' http://localhost:8000 http://localhost:8001 http://localhost:8002 http://localhost:3000 http://localhost:3001 ws://localhost:3000 ws://localhost:3001",
+      // connect-src: derived from NEXT_PUBLIC_API_URL so it works locally and on Railway
+      `connect-src 'self' ws: wss: http://localhost:8002 ws://localhost:3000 ${API_ORIGIN}`,
       "frame-ancestors 'none'",
       "base-uri 'self'",
       "form-action 'self'",
@@ -38,6 +57,7 @@ const securityHeaders = [
 ];
 
 const nextConfig = {
+  output: 'standalone',   // required for Docker multi-stage build
   images: { domains: [] },
   async headers() {
     return [

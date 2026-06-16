@@ -2,17 +2,117 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ── CSS Custom Properties ─────────────────────────────────────────────────── */
+/* ============================================================================
+   GPA ERP — Design System Foundations  (v5.0 revamp)
+   PT Garuda Prima Aksara · Civil construction ERP + HRIS
+   Direction: Garuda Navy + Gold on warm canvas.
+   ========================================================================== */
+
 :root {
-  --gpa-primary: #1E40AF;
-  --gpa-accent: #F59E0B;
-  --gpa-canvas: #F0EFEA;
-  --gpa-sidebar: #111827;
-  --sidebar-width: 220px;
-  --topbar-height: 56px;
+  /* ── Brand: Primary (Garuda Navy) ──────────────────────────────────────── */
+  --primary-50:   #EEF3F8;
+  --primary-100:  #D6E2EF;
+  --primary-200:  #AEC6DD;
+  --primary-300:  #7FA6C9;
+  --primary-500:  #2D6CA0;
+  --primary-600:  #134E7E;
+  --primary-700:  #0A3A63;
+  --primary-800:  #06294A;
+  --primary-900:  #021B33;
+  --primary:      var(--primary-800);
+
+  /* ── Brand: Accent (Garuda Gold) ────────────────────────────────────────── */
+  --accent:       #F59E0B;
+  --accent-dark:  #D97706;
+  --accent-light: #FEF3C7;
+  --accent-50:    #FFFBEB;
+  --on-accent:    #111827;
+
+  /* ── Surface & canvas ────────────────────────────────────────────────────── */
+  --canvas:       #F0EFEA;
+  --canvas-tint:  #FAF8F4;
+  --surface:      #FFFFFF;
+  --surface-2:    #F8FAF9;
+
+  /* ── Sidebar ─────────────────────────────────────────────────────────────── */
+  --sidebar:         #111827;
+  --sidebar-hover:   #1F2937;
+  --sidebar-active:  #1F2937;
+  --sidebar-border:  #1F2937;
+  --sidebar-text:    #9CA3AF;
+  --sidebar-heading: #6B7280;
+
+  /* ── Text / foreground ───────────────────────────────────────────────────── */
+  --fg-1: #0C2138;
+  --fg-2: #33445A;
+  --fg-3: #5E7186;
+  --fg-4: #94A3B8;
+  --fg-on-dark: #F8FAFC;
+
+  /* ── Borders ─────────────────────────────────────────────────────────────── */
+  --border:        #E7E5DF;
+  --border-strong: #D6D3CB;
+  --border-cool:   #E2E8F0;
+
+  /* ── Status colors — SEMANTICS LOCKED ───────────────────────────────────── */
+  --st-approved:    #16A34A;  --st-approved-bg:  #F0FDF4;  --st-approved-bd:  #BBF7D0;
+  --st-pending:     #D97706;  --st-pending-bg:   #FFFBEB;  --st-pending-bd:   #FDE68A;
+  --st-rejected:    #DC2626;  --st-rejected-bg:  #FEF2F2;  --st-rejected-bd:  #FECACA;
+  --st-submitted:   #2563EB;  --st-submitted-bg: #EFF6FF;  --st-submitted-bd: #BFDBFE;
+  --st-verified:    #0891B2;  --st-verified-bg:  #ECFEFF;  --st-verified-bd:  #A5F3FC;
+  --st-paid:        #7C3AED;  --st-paid-bg:      #F5F3FF;  --st-paid-bd:      #DDD6FE;
+  --st-draft:       #475569;  --st-draft-bg:     #F8FAFC;  --st-draft-bd:     #E2E8F0;
+  --st-locked:      #0F172A;  --st-locked-bg:    #0F172A;  --st-locked-bd:    #0F172A;
+
+  /* ── Burn-rate bars ──────────────────────────────────────────────────────── */
+  --bar-ok:       #16A34A;
+  --bar-caution:  #D97706;
+  --bar-critical: #DC2626;
+
+  /* ── Typography ──────────────────────────────────────────────────────────── */
+  --font-sans: "Plus Jakarta Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "Roboto Mono", "JetBrains Mono", ui-monospace, "Consolas", monospace;
+
+  /* ── Type scale ──────────────────────────────────────────────────────────── */
+  --text-h1:    20px;  --lh-h1:    28px;
+  --text-h2:    16px;  --lh-h2:    22px;
+  --text-title: 14px;  --lh-title: 20px;
+  --text-body:  14px;  --lh-body:  21px;
+  --text-sm:    13px;  --lh-sm:    18px;
+  --text-label: 12px;  --lh-label: 16px;
+  --text-tiny:  11px;  --lh-tiny:  14px;
+  --text-micro: 10px;  --lh-micro: 13px;
+
+  --tracking-eyebrow: 0.14em;
+  --tracking-tight:  -0.01em;
+
+  /* ── Radii ───────────────────────────────────────────────────────────────── */
+  --r-xs:   4px;
+  --r-sm:   6px;
+  --r-md:   8px;
+  --r-lg:   12px;
+  --r-xl:   16px;
+  --r-pill: 999px;
+
+  /* ── Elevation ───────────────────────────────────────────────────────────── */
+  --shadow-xs:    0 1px 2px rgba(15,23,42,0.05);
+  --shadow-card:  0 2px 8px rgba(15,23,42,0.06), 0 1px 2px rgba(15,23,42,0.04);
+  --shadow-md:    0 4px 12px rgba(15,23,42,0.08), 0 2px 4px rgba(15,23,42,0.04);
+  --shadow-pop:   0 8px 24px rgba(15,23,42,0.12);
+  --shadow-modal: 0 20px 60px -12px rgba(15,23,42,0.25);
+
+  /* ── Motion ──────────────────────────────────────────────────────────────── */
+  --ease:     cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-fast: 120ms;
+  --dur:      180ms;
+  --dur-slow: 250ms;
+
+  /* ── Layout ──────────────────────────────────────────────────────────────── */
+  --sidebar-width:  220px;
+  --topbar-height:  56px;
 }
 
-/* ── Base ───────────────────────────────────────────────────────────────────── */
+/* ── Base ──────────────────────────────────────────────────────────────────── */
 * { box-sizing: border-box; }
 
 html {
@@ -21,54 +121,66 @@ html {
 }
 
 body {
-  background-color: var(--gpa-canvas);
-  color: #111827;
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  line-height: var(--lh-body);
+  color: var(--fg-2);
+  background-color: var(--canvas);
   font-feature-settings: "rlig" 1, "calt" 1;
 }
 
-/* ── Scrollbar ──────────────────────────────────────────────────────────────── */
+/* ── Scrollbar ─────────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #D1D5DB; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #9CA3AF; }
+::-webkit-scrollbar-thumb { background: #D1CEC6; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #B8B4AA; }
 
-/* ── Numeric font utility ───────────────────────────────────────────────────── */
-.tabular-nums { font-variant-numeric: tabular-nums; }
+/* ── Numeric / tabular ─────────────────────────────────────────────────────── */
+.tabular-nums, .num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
 
-/* ── Shimmer skeleton ───────────────────────────────────────────────────────── */
+/* ── Eyebrow / section kicker ──────────────────────────────────────────────── */
+.eyebrow {
+  font-size: var(--text-micro);
+  font-weight: 700;
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  color: var(--fg-4);
+}
+
+/* ── Shimmer skeleton ──────────────────────────────────────────────────────── */
 .skeleton {
   background: linear-gradient(90deg, #E5E7EB 25%, #F3F4F6 50%, #E5E7EB 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
 }
-
-/* ── Prose numbers ──────────────────────────────────────────────────────────── */
-.num {
-  font-family: var(--font-roboto-mono), "JetBrains Mono", monospace;
-  font-variant-numeric: tabular-nums;
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
 }
 
-/* ── Sidebar item active accent border ─────────────────────────────────────── */
+/* ── Sidebar nav active (amber left-bar via ::before) ──────────────────────── */
 .nav-active {
   position: relative;
-  background-color: #1F2937;
-  color: #FFFFFF;
+  background-color: var(--sidebar-active);
+  color: #fff;
 }
 .nav-active::before {
   content: "";
   position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
+  left: 0; top: 0; bottom: 0;
   width: 3px;
-  background: var(--gpa-accent);
+  background: var(--accent);
   border-radius: 0 2px 2px 0;
 }
 
 /* ── Burn-rate bar colors ───────────────────────────────────────────────────── */
-.bar-ok      { background-color: #16A34A; }
-.bar-caution { background-color: #D97706; }
-.bar-critical { background-color: #DC2626; }
+.bar-ok       { background-color: var(--bar-ok); }
+.bar-caution  { background-color: var(--bar-caution); }
+.bar-critical { background-color: var(--bar-critical); }
 
 /* ── Modal backdrop ─────────────────────────────────────────────────────────── */
 .modal-backdrop {
@@ -76,18 +188,49 @@ body {
   -webkit-backdrop-filter: blur(2px);
 }
 
-/* ── Focus ring (consistent) ────────────────────────────────────────────────── */
-.focus-ring:focus {
-  outline: none;
-  ring: 2px;
-  ring-offset: 2px;
-  ring-color: var(--gpa-primary);
+/* ── Table helpers ──────────────────────────────────────────────────────────── */
+.th {
+  @apply text-[10px] font-bold tracking-[0.08em] text-[#94A3B8] uppercase px-[18px] py-[11px] text-left whitespace-nowrap;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.td {
+  @apply px-[18px] py-3 text-[13px] whitespace-nowrap;
+  color: var(--fg-2);
+  border-bottom: 1px solid var(--border);
 }
 
-/* ── Table helpers ──────────────────────────────────────────────────────────── */
-.th { @apply text-[10px] font-semibold tracking-widest text-gray-400 uppercase px-4 py-3 text-left; }
-.td { @apply px-4 py-3 text-sm text-gray-700 whitespace-nowrap; }
+/* ── Alternating table rows ─────────────────────────────────────────────────── */
+tbody tr:nth-child(even) { background: var(--canvas-tint); }
+tbody tr:hover { background: #F4F6F8; }
+tbody tr:last-child .td,
+tbody tr:last-child td  { border-bottom: none; }
 
-/* ── Status row highlight (critical items) ──────────────────────────────────── */
-tr.row-critical { background-color: #FEF2F2; }
-tr.row-low      { background-color: #FFFBEB; }
+/* ── Status row highlight ───────────────────────────────────────────────────── */
+tr.row-critical { background-color: var(--st-rejected-bg) !important; }
+tr.row-low      { background-color: var(--st-pending-bg)  !important; }
+
+/* ── iOS input zoom prevention ──────────────────────────────────────────────── */
+@media (max-width: 639px) {
+  input, select, textarea { font-size: 16px !important; }
+  .td { @apply py-3.5; }
+}
+
+/* ── Safe area insets ───────────────────────────────────────────────────────── */
+.safe-area-inset-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* ── Animations ─────────────────────────────────────────────────────────────── */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(24px); }
+  to   { opacity: 1; transform: translateX(0); }
+}

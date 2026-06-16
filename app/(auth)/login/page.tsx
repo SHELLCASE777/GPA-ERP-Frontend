@@ -20,7 +20,7 @@ export default function LoginPage() {
     setLoading(true);
     try {
       await login(email, pass);
-      router.push("/dashboard");
+      router.push("/home");
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
