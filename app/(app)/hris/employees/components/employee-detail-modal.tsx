@@ -110,6 +110,74 @@ function empToForm(d: Employee): EditForm {
   };
 }
 
+const ROLES = ["WORKER", "STAFF", "GA", "FINANCE", "COST_CONTROL", "PM", "MD", "HR"] as const;
+
+function AccountSection({ employee, onCreated }: { employee: Employee; onCreated: () => void }) {
+  const [role, setRole] = useState("WORKER");
+  const [tempPass, setTempPass] = useState<string | null>(null);
+
+  const mut = useMutation({
+    mutationFn: () =>
+      hrisEmployeesApi.bulkCreateAccounts([{ employee_id: employee.id, role_name: role }]),
+    onSuccess: (res) => {
+      const result = res.data.results[0];
+      if (result.status === "created") {
+        toastSuccess("Akun berhasil dibuat");
+        setTempPass(result.temp_password ?? null);
+        onCreated();
+      } else {
+        toastError(result.detail);
+      }
+    },
+    onError: () => toastError("Gagal membuat akun"),
+  });
+
+  if (employee.user_id) {
+    return (
+      <div className="flex gap-3 py-2 border-b border-gray-50">
+        <span className="text-xs text-gray-400 w-36 shrink-0 pt-0.5">Akun Sistem</span>
+        <div className="flex items-center gap-2">
+          <Badge className="bg-green-50 text-green-700 border-green-200 text-[10px]">Aktif</Badge>
+          <span className="text-sm text-gray-900 font-medium">{(employee as any).user?.email ?? "—"}</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex gap-3 py-2 border-b border-gray-50">
+      <span className="text-xs text-gray-400 w-36 shrink-0 pt-0.5">Akun Sistem</span>
+      <div className="flex-1 space-y-2">
+        {tempPass ? (
+          <div className="rounded-lg bg-teal-50 border border-teal-200 p-2 space-y-1">
+            <p className="text-xs text-teal-700 font-medium">Akun dibuat! Simpan password sementara:</p>
+            <p className="font-mono text-sm text-teal-900 select-all break-all">{tempPass}</p>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            {employee.email ? (
+              <>
+                <select
+                  className="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                  value={role}
+                  onChange={e => setRole(e.target.value)}
+                >
+                  {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
+                <Button size="sm" onClick={() => mut.mutate()} disabled={mut.isPending}>
+                  {mut.isPending ? "..." : "Buat Akun"}
+                </Button>
+              </>
+            ) : (
+              <span className="text-xs text-amber-600">Isi email karyawan dulu</span>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function EmployeeDetailModal({ open, onClose, employee: emp }: Props) {
   const [tab, setTab] = useState<Tab>("profile");
   const [docType, setDocType] = useState<EmpDocType>("KTP");
@@ -337,7 +405,7 @@ export default function EmployeeDetailModal({ open, onClose, employee: emp }: Pr
           <InfoRow label="Tanggal Selesai" value={d.end_date  ? fmtDate(d.end_date)  : null} />
           <InfoRow label="Departemen"      value={d.department?.name} />
           <InfoRow label="Grade"           value={d.grade ? `${d.grade.name} (Level ${d.grade.level})` : null} />
-          <InfoRow label="Akun Sistem"     value={d.user?.full_name} />
+          <AccountSection employee={d} onCreated={() => qc.invalidateQueries({ queryKey: ["hris", "employees"] })} />
           <InfoRow label="Lokasi Absensi"  value={(d as any).work_location?.name ?? null} />
           <p className="text-[10px] font-semibold tracking-widest text-teal-600 uppercase mb-2 mt-5">BPJS & Bank</p>
           <InfoRow label="BPJS TK No."  value={d.bpjs_tk_no} />
