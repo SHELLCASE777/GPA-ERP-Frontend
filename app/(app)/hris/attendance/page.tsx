@@ -1,9 +1,9 @@
-"use client";
+﻿"use client";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  Fingerprint, Download, PlusCircle, Camera, Clock, CheckCircle2, AlertCircle,
-  ChevronLeft, ChevronRight, Search,
+  Fingerprint, Download, PlusCircle, Clock, CheckCircle2, AlertCircle,
+  ChevronLeft, ChevronRight, Search, Trash2, LogIn,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -11,8 +11,11 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Modal } from "@/components/ui/modal";
 import { ClockInModal } from "./components/clock-in-modal";
-import { hrisAttendanceApi, hrisEmployeesApi } from "@/lib/api";
-import type { AttendanceRecord, AttendanceSummaryItem, Employee } from "@/lib/types";
+import { hrisAttendanceApi, hrisEmployeesApi, hrisWorkGroupsApi, hrisOvertimeApi } from "@/lib/api";
+import { useRole } from "@/lib/auth-context";
+import type { AttendanceRecord, AttendanceSummaryItem, Employee, WorkGroup, OvertimeRequest } from "@/lib/types";
+import { toastError, toastSuccess } from "@/lib/hooks/use-toast";
+import { SelfieModal } from "@/components/hris/SelfieModal";
 import { cn } from "@/lib/utils";
 
 /* ─── Helpers ─────────────────────────────────────────────────────────────── */
@@ -32,15 +35,196 @@ function fmtHours(h: number | null | undefined): string {
   return isNaN(n) ? "—" : `${n.toFixed(1)}j`;
 }
 
-function faceChip(rec: AttendanceRecord) {
-  if (!rec.selfie_url) return null;
-  if (rec.face_verified)
-    return (
-      <Badge className="bg-teal-50 text-teal-700 border-teal-200">
-        ✓ Face {((rec.face_confidence ?? 0) * 100).toFixed(0)}%
-      </Badge>
-    );
-  return <Badge className="bg-amber-50 text-amber-700 border-amber-200">⚠ Review</Badge>;
+function locationChip(rec: AttendanceRecord) {
+  const BASE_URL = process.env.NEXT_PUBLIC_API_URL?.replace("/api", "") ?? "http://localhost:8000";
+  if (rec.matched_location_name) {
+    const isHO   = rec.matched_location_type === "home_office";
+    const isSite = rec.matched_location_type === "site";
+    const color  = isHO ? "bg-teal-50 text-teal-700 border-teal-200"
+                 : isSite ? "bg-blue-50 text-blue-700 border-blue-200"
+                 : "bg-gray-50 text-gray-600 border-gray-200";
+    const icon   = isHO ? "🏢" : isSite ? "⛏" : "📍";
+    const dist   = rec.location_distance_m != null ? ` · ${Math.round(Number(rec.location_distance_m))}m` : "";
+    return <Badge className={`${color} text-[10px]`}>{icon} {rec.matched_location_name}{dist}</Badge>;
+  }
+  if (rec.location_ok === false) {
+    const dist = rec.location_distance_m != null ? ` · ${Math.round(Number(rec.location_distance_m))}m` : "";
+    return <Badge className="bg-amber-50 text-amber-700 border-amber-200 text-[10px]">✗ Di luar radius{dist}</Badge>;
+  }
+  if (rec.latitude != null) return <span className="text-gray-300 text-[11px]">—</span>;
+  return null;
+  void BASE_URL;
+}
+
+/* ─── Overtime approval panel ────────────────────────────────────────────── */
+const OT_STATUS_LABEL: Record<string, string> = {
+  draft: "Draft", submitted: "Diajukan", approved: "Disetujui", rejected: "Ditolak",
+};
+const OT_STATUS_COLOR: Record<string, string> = {
+  draft:     "bg-gray-50 text-gray-600 border-gray-200",
+  submitted: "bg-amber-50 text-amber-700 border-amber-200",
+  approved:  "bg-teal-50 text-teal-700 border-teal-200",
+  rejected:  "bg-red-50 text-red-700 border-red-200",
+};
+
+function OvertimeApprovalPanel() {
+  const qc = useQueryClient();
+  const [filterStatus, setFilterStatus] = useState<"" | "submitted" | "approved" | "rejected">("");
+  const [rejectId, setRejectId] = useState<number | null>(null);
+  const [rejectNote, setRejectNote] = useState("");
+
+  const { data: requests = [], isLoading } = useQuery<OvertimeRequest[]>({
+    queryKey: ["hris", "overtime-requests", filterStatus],
+    queryFn: () => hrisOvertimeApi.list(filterStatus ? { status: filterStatus } : undefined).then(r => r.data),
+  });
+
+  const approveMut = useMutation({
+    mutationFn: (id: number) => hrisOvertimeApi.approve(id),
+    onSuccess: () => {
+      toastSuccess("Pengajuan lembur disetujui");
+      qc.invalidateQueries({ queryKey: ["hris", "overtime-requests"] });
+    },
+    onError: () => toastError("Gagal menyetujui"),
+  });
+
+  const rejectMut = useMutation({
+    mutationFn: ({ id, note }: { id: number; note: string }) => hrisOvertimeApi.reject(id, note),
+    onSuccess: () => {
+      toastSuccess("Pengajuan lembur ditolak");
+      qc.invalidateQueries({ queryKey: ["hris", "overtime-requests"] });
+      setRejectId(null);
+      setRejectNote("");
+    },
+    onError: () => toastError("Gagal menolak"),
+  });
+
+  const pending = requests.filter(r => r.status === "submitted").length;
+
+  return (
+    <>
+      <Card padding={false}>
+        {/* Filter bar */}
+        <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-3 flex-wrap">
+          <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+            {([
+              { value: "", label: "Semua" },
+              { value: "submitted", label: `Diajukan${pending > 0 ? ` (${pending})` : ""}` },
+              { value: "approved",  label: "Disetujui" },
+              { value: "rejected",  label: "Ditolak" },
+            ] as const).map(opt => (
+              <button key={opt.value} onClick={() => setFilterStatus(opt.value)}
+                className={cn(
+                  "px-3 py-1 rounded-md text-xs font-medium transition-colors",
+                  filterStatus === opt.value ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
+                )}>
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Table */}
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-100">
+                {["Karyawan","Tanggal","Rencana Jam","Alasan","Status","Aksi"].map(h => (
+                  <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold text-gray-400 uppercase tracking-wide whitespace-nowrap">
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {isLoading
+                ? Array.from({ length: 4 }).map((_, i) => (
+                    <tr key={i}>
+                      {Array.from({ length: 6 }).map((_, j) => (
+                        <td key={j} className="px-4 py-3"><Skeleton className="h-4 w-16" /></td>
+                      ))}
+                    </tr>
+                  ))
+                : requests.length === 0
+                  ? (
+                      <tr>
+                        <td colSpan={6} className="px-4 py-12 text-center text-sm text-gray-400">
+                          Tidak ada pengajuan lembur
+                        </td>
+                      </tr>
+                    )
+                  : requests.map(req => (
+                      <tr key={req.id} className="hover:bg-gray-50/50 transition-colors">
+                        <td className="px-4 py-3">
+                          <p className="text-xs font-medium text-gray-900">{req.employee_name ?? `#${req.employee_id}`}</p>
+                        </td>
+                        <td className="px-4 py-3 text-xs font-mono text-gray-700">{req.date}</td>
+                        <td className="px-4 py-3 text-xs text-gray-700">{req.planned_hours} jam</td>
+                        <td className="px-4 py-3 text-xs text-gray-600 max-w-xs">
+                          <span className="line-clamp-2">{req.reason}</span>
+                          {req.rejection_reason && (
+                            <span className="block text-red-500 mt-0.5 text-[11px]">Alasan tolak: {req.rejection_reason}</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <Badge className={cn("text-[10px]", OT_STATUS_COLOR[req.status])}>
+                            {OT_STATUS_LABEL[req.status] ?? req.status}
+                          </Badge>
+                        </td>
+                        <td className="px-4 py-3">
+                          {req.status === "submitted" && (
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => approveMut.mutate(req.id)}
+                                disabled={approveMut.isPending}
+                                className="flex items-center gap-1 text-xs text-teal-600 hover:text-teal-800 font-medium disabled:opacity-50"
+                              >
+                                <CheckCircle2 size={13} /> Setuju
+                              </button>
+                              <button
+                                onClick={() => { setRejectId(req.id); setRejectNote(""); }}
+                                className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 font-medium"
+                              >
+                                <AlertCircle size={13} /> Tolak
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+              }
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      {/* Reject modal */}
+      <Modal open={rejectId !== null} onClose={() => setRejectId(null)} title="Tolak Pengajuan Lembur" size="sm"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setRejectId(null)}>Batal</Button>
+            <Button
+              onClick={() => rejectId !== null && rejectMut.mutate({ id: rejectId, note: rejectNote })}
+              disabled={rejectMut.isPending}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {rejectMut.isPending ? "Memproses…" : "Tolak"}
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-gray-600">Berikan alasan penolakan (opsional):</p>
+          <textarea
+            rows={3}
+            value={rejectNote}
+            onChange={e => setRejectNote(e.target.value)}
+            placeholder="Contoh: Tidak ada keperluan lembur pada tanggal tersebut"
+            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-red-400 focus:ring-1 focus:ring-red-400 resize-none"
+          />
+        </div>
+      </Modal>
+    </>
+  );
 }
 
 /* ─── Manual entry modal ─────────────────────────────────────────────────── */
@@ -124,86 +308,23 @@ function ManualModal({
   );
 }
 
-/* ─── Face Registration modal ────────────────────────────────────────────── */
-function FaceRegModal({
-  open, onClose, employees,
-}: {
-  open: boolean; onClose: () => void; employees: Employee[];
-}) {
-  const [empId, setEmpId] = useState("");
-  const [file,  setFile]  = useState<File | null>(null);
-  const [msg,   setMsg]   = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-
-  async function save() {
-    if (!empId || !file) { setMsg("Pilih karyawan dan foto"); return; }
-    setSaving(true); setMsg(null);
-    try {
-      const res = await hrisEmployeesApi.registerFace(Number(empId), file);
-      setMsg(res.data.message);
-    } catch (e: unknown) {
-      setMsg((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Gagal registrasi wajah");
-    } finally { setSaving(false); }
-  }
-
-  const field = "w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500";
-
-  return (
-    <Modal open={open} onClose={onClose} title="Registrasi Wajah Karyawan" size="sm"
-      footer={
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={onClose}>Tutup</Button>
-          <Button onClick={save} disabled={saving}
-            className="bg-purple-700 hover:bg-purple-800 text-white">
-            {saving ? "Mendaftar…" : "Daftarkan Wajah"}
-          </Button>
-        </div>
-      }
-    >
-      <div className="space-y-3">
-        {msg && (
-          <p className={cn("text-xs rounded-lg px-3 py-2",
-            msg.includes("Gagal") || msg.includes("error")
-              ? "bg-red-50 text-red-600"
-              : "bg-teal-50 text-teal-700"
-          )}>{msg}</p>
-        )}
-        <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Karyawan</label>
-          <select value={empId} onChange={e => setEmpId(e.target.value)} className={field}>
-            <option value="">— Pilih karyawan —</option>
-            {employees.map(e => (
-              <option key={e.id} value={e.id}>{e.employee_no} · {e.full_name}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Foto Wajah (JPG/PNG)</label>
-          <input type="file" accept="image/*"
-            onChange={e => setFile(e.target.files?.[0] ?? null)}
-            className="text-sm text-gray-600" />
-          <p className="text-[11px] text-gray-400 mt-1">
-            Pastikan wajah terlihat jelas, pencahayaan cukup, tidak memakai kacamata/masker.
-          </p>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
 /* ─── Page ────────────────────────────────────────────────────────────────── */
 export default function AttendancePage() {
   const qc = useQueryClient();
+  const { isHR, isSuperAdmin } = useRole();
   const now = new Date();
   const [year,  setYear]  = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
-  const [search, setSearch] = useState("");
-  const [tab, setTab]     = useState<"list" | "summary">("list");
+  const [search, setSearch]           = useState("");
+  const [workGroupId, setWorkGroupId] = useState<number | "">("");
+  const [tab, setTab]     = useState<"list" | "summary" | "overtime">("list");
+  const [exporting, setExporting] = useState(false);
 
   const [showClockIn,  setShowClockIn]  = useState(false);
   const [showManual,   setShowManual]   = useState(false);
-  const [showFaceReg,  setShowFaceReg]  = useState(false);
   const [clockInEmp,   setClockInEmp]   = useState<Employee | null>(null);
+  const [debugEmpId,   setDebugEmpId]   = useState<number | "">("") ;
+  const [selfieRec,    setSelfieRec]    = useState<AttendanceRecord | null>(null);
 
   const dateFrom = `${year}-${String(month).padStart(2, "0")}-01`;
   const dateToRaw = new Date(year, month, 0);
@@ -216,10 +337,19 @@ export default function AttendancePage() {
   });
   const employees = empData?.items ?? [];
 
+  /* Work groups for filter */
+  const { data: workGroups = [] } = useQuery<WorkGroup[]>({
+    queryKey: ["hris", "work-groups"],
+    queryFn:  () => hrisWorkGroupsApi.list({ is_active: true }).then(r => r.data),
+  });
+
   /* Attendance list */
   const { data: attData, isLoading: attLoad } = useQuery({
-    queryKey: ["hris", "attendance", { dateFrom, dateTo }],
-    queryFn:  () => hrisAttendanceApi.list({ date_from: dateFrom, date_to: dateTo, limit: 500 }).then(r => r.data),
+    queryKey: ["hris", "attendance", { dateFrom, dateTo, workGroupId }],
+    queryFn:  () => hrisAttendanceApi.list({
+      date_from: dateFrom, date_to: dateTo, limit: 500,
+      ...(workGroupId ? { work_group_id: Number(workGroupId) } : {}),
+    }).then(r => r.data),
   });
   const records: AttendanceRecord[] = attData?.items ?? [];
 
@@ -235,6 +365,40 @@ export default function AttendancePage() {
     mutationFn: (empId: number) => hrisAttendanceApi.clockOut({ employee_id: empId }),
     onSuccess:  () => qc.invalidateQueries({ queryKey: ["hris", "attendance"] }),
   });
+
+  /* Debug: reset today's attendance */
+  const debugResetMut = useMutation({
+    mutationFn: (empId?: number) => hrisAttendanceApi.debugResetToday(empId),
+    onSuccess: (res) => {
+      alert(res.data.detail);
+      qc.invalidateQueries({ queryKey: ["hris", "attendance"] });
+    },
+    onError: (e: unknown) => {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Reset gagal";
+      alert(`Error: ${msg}`);
+    },
+  });
+
+  /* Export */
+  async function handleExport(fmt: "xlsx" | "csv" = "xlsx") {
+    setExporting(true);
+    try {
+      const res = await hrisAttendanceApi.export({ date_from: dateFrom, date_to: dateTo, fmt });
+      const blob = new Blob([res.data as BlobPart], {
+        type: fmt === "xlsx"
+          ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          : "text/csv",
+      });
+      const url  = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href     = url;
+      link.download = `absensi_${year}-${String(month).padStart(2, "0")}.${fmt}`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      alert("Gagal mengunduh data absensi");
+    } finally { setExporting(false); }
+  }
 
   /* Filtering */
   const filtered = records.filter(r => {
@@ -275,26 +439,76 @@ export default function AttendancePage() {
           <p className="text-sm text-gray-400 mt-0.5">Rekap kehadiran harian karyawan</p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <Button variant="ghost" size="sm" onClick={() => setShowFaceReg(true)}
-            className="text-purple-700 hover:bg-purple-50 border border-purple-200">
-            <Camera size={14} className="mr-1.5" /> Daftarkan Wajah
+          <Button variant="ghost" size="sm" onClick={() => handleExport("xlsx")}
+            disabled={exporting}
+            className="text-gray-700 border border-gray-200">
+            <Download size={14} className="mr-1.5" />
+            {exporting ? "Mengunduh…" : "Export Excel"}
           </Button>
           <Button variant="ghost" size="sm" onClick={() => setShowManual(true)}
             className="text-gray-700 border border-gray-200">
             <PlusCircle size={14} className="mr-1.5" /> Manual
           </Button>
-          <Button size="sm"
-            className="bg-purple-700 hover:bg-purple-800 text-white"
-            onClick={() => {
-              const emp = employees[0] ?? null;
-              setClockInEmp(emp);
-              setShowClockIn(true);
-            }}
-          >
-            <Clock size={14} className="mr-1.5" /> Clock-In
-          </Button>
+          <div className="flex items-center gap-1.5">
+            <select
+              className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-purple-500 max-w-[180px]"
+              value={clockInEmp?.id ?? ""}
+              onChange={(e) => {
+                const found = employees.find((em) => em.id === Number(e.target.value)) ?? null;
+                setClockInEmp(found);
+              }}
+            >
+              <option value="">— Pilih karyawan —</option>
+              {employees.map((em) => (
+                <option key={em.id} value={em.id}>{em.full_name}</option>
+              ))}
+            </select>
+            <Button size="sm"
+              className="bg-purple-700 hover:bg-purple-800 text-white"
+              disabled={!clockInEmp}
+              onClick={() => setShowClockIn(true)}
+            >
+              <Clock size={14} className="mr-1.5" /> Clock-In
+            </Button>
+          </div>
         </div>
       </div>
+
+      {/* ── DEBUG PANEL (SA only) ──────────────────────────────────────────── */}
+      {isSuperAdmin && (
+        <div className="rounded-xl border border-dashed border-red-300 bg-red-50 px-4 py-3">
+          <p className="text-xs font-bold text-red-600 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+            <Trash2 size={12} /> Debug — Reset Attendance
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={debugEmpId}
+              onChange={(e) => setDebugEmpId(e.target.value ? Number(e.target.value) : "")}
+              className="text-xs border border-red-200 bg-white rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-red-400 text-gray-700 min-w-[180px]"
+            >
+              <option value="">— Pilih karyawan —</option>
+              {employees.map((emp) => (
+                <option key={emp.id} value={emp.id}>
+                  {emp.employee_no} · {emp.full_name}
+                </option>
+              ))}
+            </select>
+            <button
+              disabled={!debugEmpId || debugResetMut.isPending}
+              onClick={() => {
+                if (!debugEmpId) return;
+                if (!confirm(`Reset absensi hari ini untuk karyawan #${debugEmpId}?`)) return;
+                debugResetMut.mutate(Number(debugEmpId));
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-semibold disabled:opacity-40 transition-colors"
+            >
+              <Trash2 size={12} />
+              {debugResetMut.isPending ? "Menghapus…" : "Reset Hari Ini"}
+            </button>
+            <span className="text-[10px] text-red-400 italic">Hanya untuk testing — hapus record clock-in/out hari ini</span>
+          </div>
+        </div>
+      )}
 
       {/* Period navigation */}
       <Card>
@@ -314,25 +528,43 @@ export default function AttendancePage() {
           </div>
 
           <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
-            {(["list", "summary"] as const).map(t => (
-              <button key={t} onClick={() => setTab(t)}
+            {([
+              { value: "list",     label: "Detail" },
+              { value: "summary",  label: "Ringkasan" },
+              { value: "overtime", label: "Lembur Diajukan" },
+            ] as const).map(t => (
+              <button key={t.value} onClick={() => setTab(t.value)}
                 className={cn(
                   "px-3 py-1 rounded-md text-xs font-medium transition-colors",
-                  tab === t ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
+                  tab === t.value ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
                 )}>
-                {t === "list" ? "Detail" : "Ringkasan"}
+                {t.label}
               </button>
             ))}
           </div>
 
           {tab === "list" && (
-            <div className="relative">
-              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input
-                value={search} onChange={e => setSearch(e.target.value)}
-                placeholder="Cari karyawan…"
-                className="pl-8 pr-3 py-1.5 text-sm rounded-lg border border-gray-200 outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 w-48"
-              />
+            <div className="flex items-center gap-2 flex-wrap">
+              {workGroups.length > 0 && (
+                <select
+                  value={workGroupId}
+                  onChange={e => setWorkGroupId(e.target.value ? Number(e.target.value) : "")}
+                  className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-purple-500 text-gray-700 bg-white"
+                >
+                  <option value="">Semua Grup</option>
+                  {workGroups.map(wg => (
+                    <option key={wg.id} value={wg.id}>{wg.name}</option>
+                  ))}
+                </select>
+              )}
+              <div className="relative">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  value={search} onChange={e => setSearch(e.target.value)}
+                  placeholder="Cari karyawan…"
+                  className="pl-8 pr-3 py-1.5 text-sm rounded-lg border border-gray-200 outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 w-48"
+                />
+              </div>
             </div>
           )}
         </div>
@@ -340,82 +572,222 @@ export default function AttendancePage() {
 
       {/* TAB: Detail */}
       {tab === "list" && (
-        <Card padding={false}>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100">
-                  {["Tanggal","Karyawan","Masuk","Keluar","Jam Kerja","Lembur","Sumber","Face",""].map(h => (
-                    <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold text-gray-400 uppercase tracking-wide whitespace-nowrap">
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {attLoad
-                  ? Array.from({ length: 6 }).map((_, i) => (
-                      <tr key={i}>
-                        {Array.from({ length: 9 }).map((_, j) => (
-                          <td key={j} className="px-4 py-3"><Skeleton className="h-4 w-16" /></td>
-                        ))}
-                      </tr>
-                    ))
-                  : filtered.length === 0
-                    ? (
-                        <tr>
-                          <td colSpan={9} className="px-4 py-12 text-center text-sm text-gray-400">
-                            Belum ada data absensi untuk periode ini
-                          </td>
-                        </tr>
-                      )
-                    : filtered.map(rec => {
-                        const emp  = employees.find(e => e.id === rec.employee_id);
-                        const totalOT = (Number(rec.hours_overtime_weekday ?? 0) +
-                          Number(rec.hours_overtime_weekend ?? 0) + Number(rec.hours_overtime_holiday ?? 0));
-                        const hasClockOut = !!rec.clock_out;
-                        return (
-                          <tr key={rec.id} className="hover:bg-gray-50/50 transition-colors">
-                            <td className="px-4 py-3 text-gray-700 font-mono text-xs whitespace-nowrap">
-                              {rec.date}
-                            </td>
-                            <td className="px-4 py-3">
-                              <p className="text-gray-900 font-medium text-xs">{emp?.full_name ?? `#${rec.employee_id}`}</p>
-                              <p className="text-gray-400 text-[11px]">{emp?.employee_no}</p>
-                            </td>
-                            <td className="px-4 py-3 text-gray-700 font-mono text-xs">{fmt12H(rec.clock_in)}</td>
-                            <td className="px-4 py-3 text-gray-700 font-mono text-xs">{fmt12H(rec.clock_out)}</td>
-                            <td className="px-4 py-3 text-gray-700 text-xs">{fmtHours(rec.hours_regular)}</td>
-                            <td className="px-4 py-3 text-xs">
-                              {totalOT > 0
-                                ? <span className="text-amber-600 font-medium">{fmtHours(totalOT)}</span>
-                                : <span className="text-gray-300">—</span>}
-                            </td>
-                            <td className="px-4 py-3">
-                              <span className={cn("inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium", srcBadge[rec.source] ?? "bg-gray-100 text-gray-600")}>
-                                {rec.source}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3">{faceChip(rec)}</td>
-                            <td className="px-4 py-3">
-                              {!hasClockOut && rec.clock_in && (
-                                <button
-                                  onClick={() => clockOutMut.mutate(rec.employee_id)}
-                                  disabled={clockOutMut.isPending}
-                                  className="text-xs text-purple-600 hover:text-purple-800 font-medium underline whitespace-nowrap"
-                                >
-                                  Clock-Out
-                                </button>
-                              )}
-                            </td>
+        <>
+          {/* Desktop table — hidden on mobile */}
+          <div className="hidden sm:block">
+            <Card padding={false}>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-100">
+                      {["Tanggal","Karyawan","Masuk","Keluar","Jam Kerja","Lembur","Sumber","Lokasi","Face",""].map(h => (
+                        <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold text-gray-400 uppercase tracking-wide whitespace-nowrap">
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {attLoad
+                      ? Array.from({ length: 6 }).map((_, i) => (
+                          <tr key={i}>
+                            {Array.from({ length: 9 }).map((_, j) => (
+                              <td key={j} className="px-4 py-3"><Skeleton className="h-4 w-16" /></td>
+                            ))}
                           </tr>
-                        );
-                      })
-                }
-              </tbody>
-            </table>
+                        ))
+                      : filtered.length === 0
+                        ? (
+                            <tr>
+                              <td colSpan={10} className="px-4 py-12 text-center text-sm text-gray-400">
+                                Belum ada data absensi untuk periode ini
+                              </td>
+                            </tr>
+                          )
+                        : filtered.map(rec => {
+                            const emp  = employees.find(e => e.id === rec.employee_id);
+                            const totalOT = (Number(rec.hours_overtime_weekday ?? 0) +
+                              Number(rec.hours_overtime_weekend ?? 0) + Number(rec.hours_overtime_holiday ?? 0));
+                            const hasClockOut = !!rec.clock_out;
+                            return (
+                              <tr key={rec.id} className="hover:bg-gray-50/50 transition-colors">
+                                <td className="px-4 py-3 text-gray-700 font-mono text-xs whitespace-nowrap">
+                                  {rec.date}
+                                </td>
+                                <td className="px-4 py-3">
+                                  <p className="text-gray-900 font-medium text-xs">{emp?.full_name ?? `#${rec.employee_id}`}</p>
+                                  <p className="text-gray-400 text-[11px]">{emp?.employee_no}</p>
+                                </td>
+                                <td className="px-4 py-3 text-gray-700 font-mono text-xs">{fmt12H(rec.clock_in)}</td>
+                                <td className="px-4 py-3 text-gray-700 font-mono text-xs">{fmt12H(rec.clock_out)}</td>
+                                <td className="px-4 py-3 text-gray-700 text-xs">{fmtHours(rec.hours_regular)}</td>
+                                <td className="px-4 py-3 text-xs">
+                                  {totalOT > 0
+                                    ? <span className="text-amber-600 font-medium">{fmtHours(totalOT)}</span>
+                                    : <span className="text-gray-300">—</span>}
+                                </td>
+                                <td className="px-4 py-3">
+                                  <span className={cn("inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium", srcBadge[rec.source] ?? "bg-gray-100 text-gray-600")}>
+                                    {rec.source}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3">{locationChip(rec)}</td>
+                                <td className="px-4 py-3">
+                                  {rec.selfie_url ? (
+                                    <button
+                                      onClick={() => setSelfieRec(rec)}
+                                      className="group relative"
+                                      title="Lihat selfie"
+                                    >
+                                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                                      <img
+                                        src={`${(process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api").replace("/api", "")}/${rec.selfie_url}`}
+                                        alt="selfie"
+                                        className="w-8 h-8 rounded-full object-cover ring-2 ring-white shadow group-hover:ring-purple-400 transition-all"
+                                      />
+                                      {rec.face_verified && (
+                                        <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-teal-500 rounded-full border border-white text-[6px] text-white flex items-center justify-center">✓</span>
+                                      )}
+                                      {!rec.face_verified && (
+                                        <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-amber-400 rounded-full border border-white text-[6px] text-white flex items-center justify-center">!</span>
+                                      )}
+                                    </button>
+                                  ) : (
+                                    <span className="text-gray-300 text-[11px]">—</span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3">
+                                  {!hasClockOut && rec.clock_in && (
+                                    <button
+                                      onClick={() => clockOutMut.mutate(rec.employee_id)}
+                                      disabled={clockOutMut.isPending}
+                                      className="text-xs text-purple-600 hover:text-purple-800 font-medium underline whitespace-nowrap"
+                                    >
+                                      Clock-Out
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })
+                    }
+                  </tbody>
+                </table>
+              </div>
+            </Card>
           </div>
-        </Card>
+
+          {/* Mobile card list — visible only on small screens */}
+          <div className="sm:hidden space-y-2">
+            {attLoad
+              ? Array.from({ length: 4 }).map((_, i) => (
+                  <Card key={i}>
+                    <div className="p-3 space-y-2">
+                      <Skeleton className="h-4 w-32" />
+                      <Skeleton className="h-3 w-48" />
+                      <Skeleton className="h-3 w-24" />
+                    </div>
+                  </Card>
+                ))
+              : filtered.length === 0
+                ? (
+                    <div className="py-12 text-center text-sm text-gray-400">
+                      Belum ada data absensi untuk periode ini
+                    </div>
+                  )
+                : filtered.map(rec => {
+                    const emp = employees.find(e => e.id === rec.employee_id);
+                    const totalOT = (Number(rec.hours_overtime_weekday ?? 0) +
+                      Number(rec.hours_overtime_weekend ?? 0) + Number(rec.hours_overtime_holiday ?? 0));
+                    const hasClockOut = !!rec.clock_out;
+                    const selfieBase = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api").replace("/api", "");
+                    return (
+                      <Card key={rec.id}>
+                        <div className="p-3">
+                          <div className="flex items-start gap-3">
+                            {/* Selfie thumbnail */}
+                            {rec.selfie_url ? (
+                              <button
+                                onClick={() => setSelfieRec(rec)}
+                                className="relative flex-shrink-0"
+                                title="Lihat selfie"
+                              >
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={`${selfieBase}/${rec.selfie_url}`}
+                                  alt="selfie"
+                                  className="w-10 h-10 rounded-full object-cover ring-2 ring-white shadow"
+                                />
+                                {rec.face_verified ? (
+                                  <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-teal-500 rounded-full border border-white text-[7px] text-white flex items-center justify-center">✓</span>
+                                ) : (
+                                  <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-amber-400 rounded-full border border-white text-[7px] text-white flex items-center justify-center">!</span>
+                                )}
+                              </button>
+                            ) : (
+                              <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
+                                <Fingerprint size={16} className="text-gray-400" />
+                              </div>
+                            )}
+
+                            <div className="flex-1 min-w-0">
+                              {/* Date + employee name */}
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="text-xs font-bold text-gray-900 truncate">
+                                  {emp?.full_name ?? `#${rec.employee_id}`}
+                                </p>
+                                <span className="text-[10px] font-mono text-gray-400 whitespace-nowrap">{rec.date}</span>
+                              </div>
+                              <p className="text-[10px] text-gray-400">{emp?.employee_no}</p>
+
+                              {/* Clock times + hours */}
+                              <div className="mt-1.5 flex items-center gap-3 text-xs text-gray-600">
+                                <span className="flex items-center gap-1">
+                                  <LogIn size={11} className="text-teal-500" />
+                                  {fmt12H(rec.clock_in)}
+                                </span>
+                                <span className="text-gray-300">→</span>
+                                <span className="flex items-center gap-1">
+                                  <Clock size={11} className="text-gray-400" />
+                                  {fmt12H(rec.clock_out)}
+                                </span>
+                                {rec.hours_regular != null && (
+                                  <span className="ml-auto text-[10px] font-medium text-gray-700">
+                                    {fmtHours(rec.hours_regular)}
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* Overtime */}
+                              {totalOT > 0 && (
+                                <p className="text-[10px] text-amber-600 mt-0.5">Lembur: {fmtHours(totalOT)}</p>
+                              )}
+
+                              {/* Bottom row: source badge + location chip + clock-out action */}
+                              <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+                                <span className={cn("inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium", srcBadge[rec.source] ?? "bg-gray-100 text-gray-600")}>
+                                  {rec.source}
+                                </span>
+                                {locationChip(rec)}
+                                {!hasClockOut && rec.clock_in && (
+                                  <button
+                                    onClick={() => clockOutMut.mutate(rec.employee_id)}
+                                    disabled={clockOutMut.isPending}
+                                    className="ml-auto text-[10px] text-purple-600 hover:text-purple-800 font-medium underline"
+                                  >
+                                    Clock-Out
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </Card>
+                    );
+                  })
+            }
+          </div>
+        </>
       )}
 
       {/* TAB: Summary */}
@@ -473,14 +845,28 @@ export default function AttendancePage() {
             </table>
           </div>
           {tab === "summary" && (summary as AttendanceSummaryItem[]).length > 0 && (
-            <div className="px-5 py-3 border-t border-gray-50 flex justify-end">
-              <button className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700">
+            <div className="px-5 py-3 border-t border-gray-50 flex justify-end gap-2">
+              <button
+                onClick={() => handleExport("csv")}
+                disabled={exporting}
+                className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 disabled:opacity-50"
+              >
                 <Download size={13} /> Export CSV
+              </button>
+              <button
+                onClick={() => handleExport("xlsx")}
+                disabled={exporting}
+                className="flex items-center gap-1.5 text-xs text-teal-600 hover:text-teal-800 disabled:opacity-50"
+              >
+                <Download size={13} /> Export Excel
               </button>
             </div>
           )}
         </Card>
       )}
+
+      {/* TAB: Lembur Diajukan */}
+      {tab === "overtime" && <OvertimeApprovalPanel />}
 
       {/* ── Modals ──────────────────────────────────────────────────────── */}
       <ClockInModal
@@ -497,11 +883,21 @@ export default function AttendancePage() {
         onCreated={() => qc.invalidateQueries({ queryKey: ["hris", "attendance"] })}
       />
 
-      <FaceRegModal
-        open={showFaceReg}
-        onClose={() => setShowFaceReg(false)}
-        employees={employees}
-      />
+      {selfieRec && selfieRec.selfie_url && (() => {
+        const emp = employees.find(e => e.id === selfieRec.employee_id);
+        return (
+          <SelfieModal
+            open={!!selfieRec}
+            onClose={() => setSelfieRec(null)}
+            selfie_url={selfieRec.selfie_url!}
+            face_verified={selfieRec.face_verified}
+            face_confidence={selfieRec.face_confidence}
+            employee_name={emp?.full_name ?? `Karyawan #${selfieRec.employee_id}`}
+            date={selfieRec.date}
+          />
+        );
+      })()}
+
     </div>
   );
 }

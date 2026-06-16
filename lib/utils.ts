@@ -149,14 +149,27 @@ export const ROLE_LABEL: Record<string, string> = {
   FINANCE:      "Finance",
   GA:           "General Admin",
   STAFF:        "Staff",
+  WORKER:       "Worker (Self-Service)",
 };
 
 // ─── Axios error message ──────────────────────────────────────────────────────
 
 export function getErrorMessage(error: unknown): string {
   if (typeof error === "object" && error !== null) {
-    const e = error as { response?: { data?: { detail?: string } }; message?: string };
-    return e.response?.data?.detail ?? e.message ?? "An unexpected error occurred";
+    const e = error as { response?: { data?: { detail?: unknown } }; message?: string };
+    const detail = e.response?.data?.detail;
+    if (Array.isArray(detail)) {
+      // FastAPI / Pydantic validation errors: [{type, loc, msg, input}, ...]
+      const msgs = detail
+        .map((d: unknown) => {
+          if (typeof d === "object" && d !== null && "msg" in d) return String((d as { msg: unknown }).msg);
+          return null;
+        })
+        .filter(Boolean);
+      return msgs.length > 0 ? msgs.join("; ") : "Validation error";
+    }
+    if (typeof detail === "string") return detail;
+    return e.message ?? "An unexpected error occurred";
   }
   return String(error);
 }

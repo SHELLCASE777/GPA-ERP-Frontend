@@ -344,8 +344,7 @@ function DocumentsTab({ projectId }: { projectId: number }) {
   });
 
   function openDoc(docId: number, title: string) {
-    const token = localStorage.getItem("gpa_token");
-    fetch(projectsApi.documentUrl(projectId, docId), { headers: { Authorization: `Bearer ${token}` } })
+    fetch(projectsApi.documentUrl(projectId, docId), { credentials: "include" })
       .then((r) => r.blob())
       .then((blob) => {
         const url = URL.createObjectURL(blob);

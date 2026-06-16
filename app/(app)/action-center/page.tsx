@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Eye, ShieldCheck, Banknote, Send, AlertCircle, X } from "lucide-react";
+import { CheckCircle2, Eye, ShieldCheck, Banknote, Send, AlertCircle, X, Receipt } from "lucide-react";
 import { expensesApi } from "@/lib/api";
 import { formatCurrency, fmtDateTime, getErrorMessage } from "@/lib/utils";
 import { Card } from "@/components/ui/card";
@@ -50,6 +50,7 @@ function ActionGroup({ title, icon: Icon, color, expenses, action, onDone, onVie
         </span>
       </div>
       <Card padding={false}>
+        <div className="overflow-x-auto">
         <table className="w-full">
           <thead>
             <tr className="border-b border-gray-100">
@@ -103,6 +104,7 @@ function ActionGroup({ title, icon: Icon, color, expenses, action, onDone, onVie
             ))}
           </tbody>
         </table>
+        </div>
       </Card>
     </div>
   );
@@ -110,7 +112,7 @@ function ActionGroup({ title, icon: Icon, color, expenses, action, onDone, onVie
 
 export default function ActionCenterPage() {
   const qc             = useQueryClient();
-  const { isCostControl, isFinance, isMD, isSuperAdmin } = useRole();
+  const { isCostControl, isFinance, isMD, isSuperAdmin, isHR } = useRole();
   const [selectedExpense, setSelectedExpense] = useState<Expense | null>(null);
 
   const { data: expenses = [], isLoading, refetch } = useQuery({
@@ -118,7 +120,18 @@ export default function ActionCenterPage() {
     queryFn: () => expensesApi.list({ my_queue: false, limit: 100 }).then((r) => r.data.items),
   });
 
-  const toVerify  = expenses.filter((e) => e.status === "submitted" && isCostControl);
+  // GA receipt review — reimbursements waiting for GA at step 0
+  const toReceiptReview = expenses.filter((e) =>
+    e.status === "submitted" &&
+    e.current_approver_role === "GA" &&
+    isHR
+  );
+  // CC verify — any submitted expense waiting for COST_CONTROL
+  const toVerify  = expenses.filter((e) =>
+    e.status === "submitted" &&
+    e.current_approver_role === "COST_CONTROL" &&
+    isCostControl
+  );
   const toApprove = expenses.filter((e) =>
     ["submitted","verified"].includes(e.status) &&
     (isMD || (e.current_approver_role === "PM") || (e.current_approver_role === "FINANCE" && isFinance))
@@ -126,7 +139,7 @@ export default function ActionCenterPage() {
   const toPay     = expenses.filter((e) => e.status === "approved" && isFinance);
   const toSubmit  = expenses.filter((e) => e.status === "draft");
 
-  const total = toVerify.length + toApprove.length + toPay.length;
+  const total = toReceiptReview.length + toVerify.length + toApprove.length + toPay.length;
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -141,10 +154,11 @@ export default function ActionCenterPage() {
       {!isLoading && (
         <div className="flex flex-wrap gap-2">
           {[
-            { label: "To Verify",  count: toVerify.length,  color: "bg-cyan-500"  },
-            { label: "To Approve", count: toApprove.length, color: "bg-green-600" },
-            { label: "To Pay",     count: toPay.length,     color: "bg-purple-600"},
-            { label: "Draft",      count: toSubmit.length,  color: "bg-gray-500"  },
+            { label: "Receipt Review", count: toReceiptReview.length, color: "bg-amber-500"  },
+            { label: "To Verify",      count: toVerify.length,        color: "bg-cyan-500"   },
+            { label: "To Approve",     count: toApprove.length,       color: "bg-green-600"  },
+            { label: "To Pay",         count: toPay.length,           color: "bg-purple-600" },
+            { label: "Draft",          count: toSubmit.length,        color: "bg-gray-500"   },
           ].map((p) => p.count > 0 && (
             <div key={p.label} className="flex items-center gap-2 bg-white border border-gray-200 rounded-full px-3 py-1.5 shadow-sm">
               <span className={`w-2 h-2 rounded-full ${p.color}`} />
@@ -165,6 +179,15 @@ export default function ActionCenterPage() {
         </Card>
       ) : (
         <div className="space-y-6">
+          <ActionGroup
+            title="Receipt Review (GA)"
+            icon={Receipt}
+            color="bg-amber-500"
+            expenses={toReceiptReview}
+            action={{ label: "Review Receipt", fn: (id) => expensesApi.verify(id) }}
+            onDone={() => qc.invalidateQueries({ queryKey: ["expenses"] })}
+            onView={(exp) => setSelectedExpense(exp)}
+          />
           <ActionGroup
             title="To Verify (Cost Control)"
             icon={ShieldCheck}
@@ -212,13 +235,31 @@ export default function ActionCenterPage() {
               <button onClick={() => setSelectedExpense(null)} className="p-2 rounded-lg hover:bg-gray-100"><X size={16} /></button>
             </div>
             <div className="space-y-4">
+              {selectedExpense.expense_type === "reimbursement" && (
+                <div className="flex items-center gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
+                  <Receipt size={13} className="text-amber-500 shrink-0" />
+                  <span className="text-xs font-semibold text-amber-700">Reimbursement Request</span>
+                </div>
+              )}
               <div><p className="text-xs text-gray-400 uppercase tracking-wide">Description</p><p className="text-sm font-medium text-gray-900 mt-1">{selectedExpense.description}</p></div>
               <div><p className="text-xs text-gray-400 uppercase tracking-wide">Amount</p><p className="text-xl font-bold text-gray-900 mt-1 num">{formatCurrency(selectedExpense.amount)}</p></div>
-              <div><p className="text-xs text-gray-400 uppercase tracking-wide">Project ID</p><p className="text-sm text-gray-700 mt-1 num">#{selectedExpense.project_id}</p></div>
+              {selectedExpense.project_id != null && (
+                <div><p className="text-xs text-gray-400 uppercase tracking-wide">Project ID</p><p className="text-sm text-gray-700 mt-1 num">#{selectedExpense.project_id}</p></div>
+              )}
               <div><p className="text-xs text-gray-400 uppercase tracking-wide">Cost Code</p><p className="text-sm text-gray-700 mt-1">{selectedExpense.cost_code?.code ?? "—"} · {selectedExpense.cost_code?.name ?? ""}</p></div>
               <div><p className="text-xs text-gray-400 uppercase tracking-wide">Status</p><div className="mt-1"><ExpenseStatusBadge status={selectedExpense.status} /></div></div>
               {selectedExpense.vendor_name && <div><p className="text-xs text-gray-400 uppercase tracking-wide">Vendor</p><p className="text-sm text-gray-700 mt-1">{selectedExpense.vendor_name}</p></div>}
-              {selectedExpense.receipt_url && <div><p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Receipt</p><a href={selectedExpense.receipt_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 text-sm hover:underline">View Receipt</a></div>}
+              {selectedExpense.receipt_url && (
+                <div>
+                  <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">
+                    Receipt {selectedExpense.expense_type === "reimbursement" && <span className="text-red-500">*</span>}
+                  </p>
+                  <a href={selectedExpense.receipt_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 text-sm hover:underline">View Receipt ↗</a>
+                </div>
+              )}
+              {!selectedExpense.receipt_url && selectedExpense.expense_type === "reimbursement" && (
+                <div className="text-xs text-red-500 font-medium">⚠ No receipt attached</div>
+              )}
               <div><p className="text-xs text-gray-400 uppercase tracking-wide">Submitted</p><p className="text-sm text-gray-500 mt-1 num">{fmtDateTime(selectedExpense.created_at)}</p></div>
             </div>
           </div>

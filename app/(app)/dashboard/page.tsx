@@ -357,7 +357,7 @@ export default function DashboardPage() {
         {expLoad ? (
           <TableSkeleton rows={5} cols={6} />
         ) : (
-          <table className="w-full">
+          <div className="overflow-x-auto"><table className="w-full">
             <thead>
               <tr className="border-b border-gray-50">
                 <th className="th">ID</th>
@@ -404,7 +404,7 @@ export default function DashboardPage() {
                 ))
               )}
             </tbody>
-          </table>
+          </table></div>
         )}
       </Card>
     </div>

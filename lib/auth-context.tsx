@@ -8,7 +8,6 @@ import type { AppMenuPermission, RoleName, User } from "./types";
 
 interface AuthState {
   user: User | null;
-  token: string | null;
   allowedMenuKeys: string[];
   menus: AppMenuPermission[];
   isLoading: boolean;
@@ -17,7 +16,7 @@ interface AuthState {
 
 interface AuthContextValue extends AuthState {
   login: (email: string, password: string) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   canAccessMenu: (key: string) => boolean;
   firstAllowedPath: () => string;
@@ -28,14 +27,13 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AuthState>({
     user: null,
-    token: null,
     allowedMenuKeys: [],
     menus: [],
     isLoading: true,
     isAuthenticated: false,
   });
 
-  const loadUser = useCallback(async (token: string) => {
+  const loadUser = useCallback(async () => {
     try {
       const [{ data: user }, { data: menuPermissions }] = await Promise.all([
         authApi.me(),
@@ -43,17 +41,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       ]);
       setState({
         user,
-        token,
         allowedMenuKeys: menuPermissions.allowed_keys,
         menus: menuPermissions.menus,
         isLoading: false,
         isAuthenticated: true,
       });
     } catch {
-      localStorage.removeItem("gpa_token");
       setState({
         user: null,
-        token: null,
         allowedMenuKeys: [],
         menus: [],
         isLoading: false,
@@ -62,27 +57,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Rehydrate from localStorage on mount
+  // On mount, restore session from localStorage token
   useEffect(() => {
-    const saved = localStorage.getItem("gpa_token");
-    if (saved) {
-      loadUser(saved);
-    } else {
-      setState((s) => ({ ...s, isLoading: false }));
-    }
+    loadUser();
   }, [loadUser]);
 
   const login = useCallback(async (email: string, password: string) => {
-    const { data } = await authApi.login(email, password);
-    localStorage.setItem("gpa_token", data.access_token);
-    await loadUser(data.access_token);
+    await authApi.login(email, password);
+    await loadUser();
   }, [loadUser]);
 
-  const logout = useCallback(() => {
-    localStorage.removeItem("gpa_token");
+  const logout = useCallback(async () => {
+    try {
+      await authApi.logout();
+    } catch {
+      // Ignore errors — clear local state regardless
+    }
     setState({
       user: null,
-      token: null,
       allowedMenuKeys: [],
       menus: [],
       isLoading: false,
@@ -91,8 +83,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const refreshUser = useCallback(async () => {
-    const token = localStorage.getItem("gpa_token");
-    if (token) await loadUser(token);
+    await loadUser();
   }, [loadUser]);
 
   const canAccessMenu = useCallback((key: string) => {
@@ -101,9 +92,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [state.allowedMenuKeys, state.user]);
 
   const firstAllowedPath = useCallback(() => {
-    const first = state.menus.find((menu) => menu.can_access && menu.path && !menu.path.startsWith("/admin"));
-    return first?.path ?? "/dashboard";
-  }, [state.menus]);
+    // WORKER and STAFF: always land on self-service home (/hris/me)
+    if (state.user?.role.name === "WORKER" || state.user?.role.name === "STAFF") return "/hris/me";
+    // Everyone else: land on the launchpad
+    return "/home";
+  }, [state.menus, state.user]);
 
   return (
     <AuthContext.Provider value={{ ...state, login, logout, refreshUser, canAccessMenu, firstAllowedPath }}>
@@ -140,11 +133,21 @@ export function useRole() {
   const isPM         = hasRole("PM", "MD", "SUPER_ADMIN");
   const isCostControl= hasRole("COST_CONTROL", "SUPER_ADMIN");
   const isFinance    = hasRole("FINANCE", "SUPER_ADMIN");
+  const isHR         = hasRole("GA", "SUPER_ADMIN");
+  // Worker = site/field worker with HRIS self-service only
+  const isWorker     = hasRole("WORKER");
+  // Self-service: worker OR staff (office) — can see /hris/me portal
+  const isSelfService = hasRole("WORKER", "STAFF");
 
   // Can sign legal documents (MD, PM, or Super Admin)
   const canSign = hasRole("MD", "PM", "SUPER_ADMIN");
 
-  return { role, hasRole, isSuperAdmin, isMD, isPM, isCostControl, isFinance, canSign };
+  return {
+    role, hasRole,
+    isSuperAdmin, isMD, isPM, isCostControl, isFinance,
+    isHR, isWorker, isSelfService,
+    canSign,
+  };
 }
 
 // ─── ProtectedRoute ───────────────────────────────────────────────────────────

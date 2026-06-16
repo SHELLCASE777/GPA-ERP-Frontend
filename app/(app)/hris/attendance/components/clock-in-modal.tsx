@@ -1,6 +1,6 @@
 "use client";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Camera, CheckCircle, Loader2, MapPin, XCircle } from "lucide-react";
+import { Camera, CheckCircle, Loader2, MapPin, XCircle, LogOut } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { hrisAttendanceApi } from "@/lib/api";
@@ -10,10 +10,14 @@ import type { AttendanceRecord, Employee } from "@/lib/types";
 type Step = "geo" | "camera" | "preview" | "submitting" | "done" | "error";
 
 interface Props {
-  open: boolean;
+  /** HR admin usage: pass the target employee. Self-service: omit (resolved server-side). */
+  employee?: Employee | null;
+  /** "clock-in" (default) or "clock-out" — clock-out skips camera entirely. */
+  mode?: "clock-in" | "clock-out";
+  /** For HR admin modal usage. When omitted the component mounts already-open. */
+  open?: boolean;
   onClose: () => void;
-  employee: Employee | null;
-  onSuccess: (record: AttendanceRecord) => void;
+  onSuccess: (record?: AttendanceRecord) => void;
 }
 
 /* ─── Helpers ────────────────────────────────────────────────────────────────── */
@@ -22,37 +26,40 @@ function fmtCoords(lat: number, lon: number) {
 }
 
 /* ─── Main component ─────────────────────────────────────────────────────────── */
-export function ClockInModal({ open, onClose, employee, onSuccess }: Props) {
+export default function ClockInModal({
+  employee = null,
+  mode = "clock-in",
+  open,
+  onClose,
+  onSuccess,
+}: Props) {
+  const isOpen = open !== undefined ? open : true;  // default open when mounted
+  const isClockin = mode === "clock-in";
+
   const videoRef  = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  const [step, setStep]       = useState<Step>("geo");
-  const [geo, setGeo]         = useState<{ lat: number; lon: number; acc: number } | null>(null);
-  const [geoError, setGeoError] = useState<string | null>(null);
+  const [step, setStep]             = useState<Step>(isClockin ? "geo" : "submitting");
+  const [geo, setGeo]               = useState<{ lat: number; lon: number; acc: number } | null>(null);
+  const [geoError, setGeoError]     = useState<string | null>(null);
   const [selfieBlob, setSelfieBlob] = useState<Blob | null>(null);
   const [selfieUrl,  setSelfieUrl]  = useState<string | null>(null);
-  const [result, setResult]   = useState<AttendanceRecord | null>(null);
-  const [errMsg, setErrMsg]   = useState<string | null>(null);
-  const [note, setNote]       = useState("");
+  const [result, setResult]         = useState<AttendanceRecord | null>(null);
+  const [errMsg, setErrMsg]         = useState<string | null>(null);
+  const [note, setNote]             = useState("");
 
-  /* reset on open */
+  /* reset when opened or mode changes */
   useEffect(() => {
-    if (open) {
-      setStep("geo");
-      setGeo(null);
-      setGeoError(null);
-      setSelfieBlob(null);
-      setSelfieUrl(null);
-      setResult(null);
-      setErrMsg(null);
-      setNote("");
-      requestGeo();
-    } else {
-      stopCamera();
-    }
+    if (!isOpen) { stopCamera(); return; }
+    setStep(isClockin ? "geo" : "submitting");
+    setGeo(null); setGeoError(null);
+    setSelfieBlob(null); setSelfieUrl(null);
+    setResult(null); setErrMsg(null); setNote("");
+    if (isClockin) requestGeo();
+    else submitClockOut();           // clock-out: no GPS, no camera, submit immediately
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [isOpen, mode]);
 
   /* ── Geolocation ─────────────────────────────────────────────────────────── */
   function requestGeo() {
@@ -62,13 +69,21 @@ export function ClockInModal({ open, onClose, employee, onSuccess }: Props) {
     }
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        setGeo({ lat: pos.coords.latitude, lon: pos.coords.longitude, acc: pos.coords.accuracy });
+        setGeo({
+          lat: pos.coords.latitude,
+          lon: pos.coords.longitude,
+          acc: pos.coords.accuracy,
+        });
         setGeoError(null);
       },
       (err) => {
         setGeoError(`GPS error: ${err.message}. Anda tetap bisa clock-in tanpa lokasi.`);
       },
-      { timeout: 10000, maximumAge: 60000, enableHighAccuracy: true }
+      {
+        timeout: 10000,
+        maximumAge: 0,          // always fresh — never use a cached position
+        enableHighAccuracy: true,
+      },
     );
   }
 
@@ -113,13 +128,12 @@ export function ClockInModal({ open, onClose, employee, onSuccess }: Props) {
         setStep("preview");
       },
       "image/jpeg",
-      0.85
+      0.85,
     );
   }, []);
 
-  /* ── Submit ──────────────────────────────────────────────────────────────── */
-  async function submit() {
-    if (!employee) return;
+  /* ── Submit clock-in ─────────────────────────────────────────────────────── */
+  async function submitClockIn() {
     setStep("submitting");
     try {
       const selfieFile = selfieBlob
@@ -127,12 +141,12 @@ export function ClockInModal({ open, onClose, employee, onSuccess }: Props) {
         : undefined;
 
       const res = await hrisAttendanceApi.clockIn({
-        employee_id: employee.id,
-        latitude:  geo?.lat,
-        longitude: geo?.lon,
-        accuracy:  geo?.acc,
-        note:      note || undefined,
-        selfie:    selfieFile,
+        employee_id: employee?.id,
+        latitude:    geo?.lat,
+        longitude:   geo?.lon,
+        accuracy:    geo?.acc,
+        note:        note || undefined,
+        selfie:      selfieFile,
       });
       setResult(res.data);
       setStep("done");
@@ -146,19 +160,39 @@ export function ClockInModal({ open, onClose, employee, onSuccess }: Props) {
     }
   }
 
+  /* ── Submit clock-out ────────────────────────────────────────────────────── */
+  async function submitClockOut() {
+    setStep("submitting");
+    try {
+      const res = await hrisAttendanceApi.clockOut(
+        employee?.id != null ? { employee_id: employee.id } : undefined,
+      );
+      setResult(res.data);
+      setStep("done");
+      onSuccess(res.data);
+    } catch (err: unknown) {
+      const detail =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
+        "Clock-out gagal. Coba lagi.";
+      setErrMsg(detail);
+      setStep("error");
+    }
+  }
+
   /* ── Render ──────────────────────────────────────────────────────────────── */
-  const empName = employee?.full_name ?? "—";
+  const empName = employee?.full_name ?? "Anda";
   const empNo   = employee?.employee_no ?? "";
+  const title   = isClockin ? "Clock-In" : "Clock-Out";
 
   return (
     <Modal
-      open={open}
+      open={isOpen}
       onClose={onClose}
-      title="Clock-In"
-      subtitle={`${empName} · ${empNo}`}
+      title={title}
+      subtitle={empNo ? `${empName} · ${empNo}` : empName}
       size="md"
     >
-      {/* STEP: Geo */}
+      {/* STEP: Geo (clock-in only) */}
       {step === "geo" && (
         <div className="space-y-5">
           <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 space-y-2">
@@ -178,11 +212,8 @@ export function ClockInModal({ open, onClose, employee, onSuccess }: Props) {
                 <Loader2 size={12} className="animate-spin" /> Mendapatkan lokasi…
               </p>
             )}
-            {(geoError) && (
-              <button
-                onClick={requestGeo}
-                className="text-xs text-teal-600 underline"
-              >
+            {geoError && (
+              <button onClick={requestGeo} className="text-xs text-teal-600 underline">
                 Coba lagi
               </button>
             )}
@@ -252,16 +283,15 @@ export function ClockInModal({ open, onClose, employee, onSuccess }: Props) {
             <div className="flex items-center gap-2 rounded-lg bg-teal-50 border border-teal-100 px-3 py-2">
               <MapPin size={14} className="text-teal-600 shrink-0" />
               <span className="text-xs text-teal-700 font-mono">
-                {fmtCoords(geo.lat, geo.lon)} <span className="text-gray-400">±{geo.acc.toFixed(0)} m</span>
+                {fmtCoords(geo.lat, geo.lon)}{" "}
+                <span className="text-gray-400">±{geo.acc.toFixed(0)} m</span>
               </span>
             </div>
           )}
 
           <div className="flex justify-between gap-2">
-            <Button variant="ghost" onClick={() => { startCamera(); }}>
-              Ulangi
-            </Button>
-            <Button onClick={submit} className="bg-teal-600 hover:bg-teal-700 text-white px-8">
+            <Button variant="ghost" onClick={startCamera}>Ulangi</Button>
+            <Button onClick={submitClockIn} className="bg-teal-600 hover:bg-teal-700 text-white px-8">
               Kirim Clock-In
             </Button>
           </div>
@@ -272,28 +302,60 @@ export function ClockInModal({ open, onClose, employee, onSuccess }: Props) {
       {step === "submitting" && (
         <div className="flex flex-col items-center justify-center py-12 gap-4">
           <Loader2 size={36} className="animate-spin text-teal-600" />
-          <p className="text-sm text-gray-500">Memproses clock-in…</p>
+          <p className="text-sm text-gray-500">
+            {isClockin ? "Memproses clock-in…" : "Memproses clock-out…"}
+          </p>
         </div>
       )}
 
       {/* STEP: Done */}
       {step === "done" && result && (
         <div className="flex flex-col items-center text-center py-8 gap-4">
-          <CheckCircle size={48} className="text-teal-500" />
+          {isClockin
+            ? <CheckCircle size={48} className="text-teal-500" />
+            : <LogOut size={48} className="text-gray-500" />
+          }
           <div>
-            <p className="text-lg font-bold text-gray-900">Clock-In Berhasil!</p>
+            <p className="text-lg font-bold text-gray-900">
+              {isClockin ? "Clock-In Berhasil!" : "Clock-Out Berhasil!"}
+            </p>
             <p className="text-sm text-gray-500 mt-1">
-              {new Date(result.clock_in!).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
-              {" · "}
-              {result.face_verified ? (
-                <span className="text-teal-600 font-medium">✓ Wajah Terverifikasi ({((result.face_confidence ?? 0) * 100).toFixed(0)}%)</span>
-              ) : (
-                <span className="text-amber-600 font-medium">⚠ Verifikasi wajah gagal — HR akan review</span>
+              {isClockin
+                ? new Date(result.clock_in!).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })
+                : result.clock_out
+                  ? new Date(result.clock_out).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })
+                  : "—"
+              }
+              {isClockin && (
+                <>
+                  {" · "}
+                  {result.face_verified ? (
+                    <span className="text-teal-600 font-medium">
+                      ✓ Wajah terdeteksi ({((result.face_confidence ?? 0) * 100).toFixed(0)}%)
+                    </span>
+                  ) : selfieBlob ? (
+                    <span className="text-amber-600 font-medium">⚠ Wajah tidak terdeteksi</span>
+                  ) : (
+                    <span className="text-gray-400">Tanpa selfie</span>
+                  )}
+                </>
               )}
             </p>
             {result.latitude && result.longitude && (
               <p className="text-xs text-gray-400 mt-1 font-mono">
-                {fmtCoords(result.latitude, result.longitude)}
+                {fmtCoords(Number(result.latitude), Number(result.longitude))}
+              </p>
+            )}
+            {result.location_ok === true && (
+              <p className="text-xs text-green-600 mt-1 font-medium">
+                ✓ Dalam radius lokasi kerja
+                {result.location_distance_m != null && ` (${Math.round(Number(result.location_distance_m))}m)`}
+              </p>
+            )}
+            {result.location_ok === false && (
+              <p className="text-xs text-amber-600 mt-1 font-medium">
+                ⚠ Di luar radius lokasi kerja
+                {result.location_distance_m != null && ` — ${Math.round(Number(result.location_distance_m))}m dari lokasi`}
               </p>
             )}
           </div>
@@ -313,7 +375,10 @@ export function ClockInModal({ open, onClose, employee, onSuccess }: Props) {
           </div>
           <div className="flex gap-2">
             <Button variant="ghost" onClick={onClose}>Tutup</Button>
-            <Button onClick={() => setStep("geo")} className="bg-teal-600 hover:bg-teal-700 text-white">
+            <Button
+              onClick={() => isClockin ? setStep("geo") : submitClockOut()}
+              className="bg-teal-600 hover:bg-teal-700 text-white"
+            >
               Coba Lagi
             </Button>
           </div>
@@ -322,3 +387,6 @@ export function ClockInModal({ open, onClose, employee, onSuccess }: Props) {
     </Modal>
   );
 }
+
+// Named export for backward compatibility with HR admin page
+export { ClockInModal };

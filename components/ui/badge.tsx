@@ -12,15 +12,16 @@ interface BadgeProps {
   dot?: boolean;
 }
 
+// Pill badge — soft, readable, no monospace uppercase
 export function Badge({ children, className, dot }: BadgeProps) {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 border font-mono text-[10px] font-semibold tracking-widest uppercase px-2 py-0.5 rounded-badge",
+        "inline-flex items-center gap-1.5 border font-sans text-[11px] font-semibold px-2.5 py-0.5 rounded-pill whitespace-nowrap",
         className
       )}
     >
-      {dot && <span className="w-1.5 h-1.5 rounded-full bg-current opacity-80" />}
+      {dot && <span className="w-1.5 h-1.5 rounded-full bg-current opacity-80 shrink-0" />}
       {children}
     </span>
   );
@@ -29,7 +30,7 @@ export function Badge({ children, className, dot }: BadgeProps) {
 export function ExpenseStatusBadge({ status }: { status: ExpenseStatus }) {
   const c = EXPENSE_STATUS_COLORS[status];
   return (
-    <Badge className={cn(c.bg, c.text, c.border)}>
+    <Badge dot className={cn(c.bg, c.text, c.border)}>
       {EXPENSE_STATUS_LABEL[status]}
     </Badge>
   );
@@ -41,7 +42,7 @@ export function ProjectStatusBadge({ status }: { status: ProjectStatus }) {
     on_hold: "On Hold", cancelled: "Cancelled",
   };
   return (
-    <Badge className={cn("border", PROJECT_STATUS_COLORS[status])}>
+    <Badge dot className={cn("border", PROJECT_STATUS_COLORS[status])}>
       {label[status]}
     </Badge>
   );
@@ -49,7 +50,7 @@ export function ProjectStatusBadge({ status }: { status: ProjectStatus }) {
 
 export function ARStatusBadge({ status }: { status: ARStatus }) {
   return (
-    <Badge className={cn("border", AR_STATUS_COLORS[status])}>
+    <Badge dot className={cn("border", AR_STATUS_COLORS[status])}>
       {status === "confirmed" ? "Confirmed" : "Draft"}
     </Badge>
   );
@@ -58,8 +59,8 @@ export function ARStatusBadge({ status }: { status: ARStatus }) {
 export function ApproverPill({ role }: { role: string | null }) {
   if (!role) return null;
   return (
-    <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-semibold px-2 py-0.5 rounded-full">
-      <span className="w-1 h-1 rounded-full bg-amber-500" />
+    <span className="inline-flex items-center gap-1.5 bg-amber-50 text-amber-700 border border-amber-200 text-[11px] font-semibold px-2.5 py-0.5 rounded-pill">
+      <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
       Pending: {role.replace("_", " ")}
     </span>
   );

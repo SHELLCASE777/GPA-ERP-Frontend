@@ -580,7 +580,7 @@ export default function ProjectsPage() {
           {isLoading ? (
             <TableSkeleton rows={6} cols={7} />
           ) : (
-            <table className="w-full">
+            <div className="overflow-x-auto"><table className="w-full">
               <thead>
                 <tr className="border-b border-gray-100">
                   <th className="th">Code</th>
@@ -603,7 +603,7 @@ export default function ProjectsPage() {
                   paged.map((p) => <ProjectRow key={p.id} project={p} onArchive={(project) => archiveMut.mutate(project)} />)
                 )}
               </tbody>
-            </table>
+            </table></div>
           )}
         </Card>
       )}

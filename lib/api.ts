@@ -7,40 +7,59 @@ import type {
   MenuPermissionsResponse, Notification, PaginatedResponse, PettyCashReport, Project,
   ProjectDocument, ProjectImportResult, TokenResponse, User, UserCreate,
   // HRIS H1
+  BulkAccountResponse,
   Department, DepartmentCreate, Employee, EmployeeCreate, EmployeeDocument,
   JobGrade, JobGradeCreate,
   // HRIS H2
-  AttendanceRecord, AttendanceSummaryItem,
+  AttendanceRecord, AttendanceSummaryItem, WorkLocation,
   LeaveType, LeaveTypeCreate, LeaveBalance, LeaveRequest, LeaveRequestCreate,
   // HRIS H3
   SalaryComponent, SalaryComponentCreate, SalaryAssignment, SalaryAssignmentCreate,
-  PayrollPeriod, PayrollRun,
+  PayrollPeriod, PayrollRun, PayslipSlip,
   // HRIS H4
   JobPosting, JobPostingCreate, Applicant, ApplicantCreate, Interview, OnboardingTask,
+  // HRIS Self-service
+  MyProfile, MyAttendanceResponse, MyLeaveBalance, MyLeaveRequest,
+  MyPayslipSummary, MyPayslipDetail, MyDocumentItem,
+  // Work Groups
+  WorkGroup, WorkGroupCreate,
+  // Enhancement Pack
+  DepartmentNode, HrisDashboardStats,
+  HolidayCalendar, HolidayCalendarCreate,
+  OvertimeRequest, OvertimeRequestCreate,
+  EmployeeDataChangeRequest, DataChangeRequestCreate,
+  LeaveCalendarItem,
 } from "./types";
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
 
+export const TOKEN_KEY = "gpa_access_token";
+
 export const api = axios.create({
   baseURL: BASE_URL,
   headers: { "Content-Type": "application/json" },
+  withCredentials: false,
 });
 
 // Attach Bearer token from localStorage on every request
 api.interceptors.request.use((config) => {
   if (typeof window !== "undefined") {
-    const token = localStorage.getItem("gpa_token");
-    if (token) config.headers.Authorization = `Bearer ${token}`;
+    const token = localStorage.getItem(TOKEN_KEY);
+    if (token) config.headers["Authorization"] = `Bearer ${token}`;
   }
   return config;
 });
 
-// On 401, clear token and reload to /login
+// On 401, redirect to /login — but only if not already there,
+// to avoid an infinite reload loop on the initial unauthenticated load.
 api.interceptors.response.use(
   (r) => r,
   (error) => {
-    if (error.response?.status === 401 && typeof window !== "undefined") {
-      localStorage.removeItem("gpa_token");
+    if (
+      error.response?.status === 401 &&
+      typeof window !== "undefined" &&
+      !window.location.pathname.startsWith("/login")
+    ) {
       window.location.replace("/login");
     }
     return Promise.reject(error);
@@ -50,15 +69,23 @@ api.interceptors.response.use(
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
 export const authApi = {
-  login: (email: string, password: string) => {
+  login: async (email: string, password: string) => {
     const form = new URLSearchParams();
     form.append("username", email);
     form.append("password", password);
-    return api.post<TokenResponse>("/auth/login", form, {
+    const res = await api.post<TokenResponse>("/auth/login", form, {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
     });
+    if (typeof window !== "undefined") {
+      localStorage.setItem(TOKEN_KEY, res.data.access_token);
+    }
+    return res;
   },
   me: () => api.get<User>("/auth/me"),
+  logout: () => {
+    if (typeof window !== "undefined") localStorage.removeItem(TOKEN_KEY);
+    return api.post<{ detail: string }>("/auth/logout");
+  },
   menuPermissions: () => api.get<MenuPermissionsResponse>("/auth/menu-permissions"),
 };
 
@@ -124,7 +151,17 @@ export const expensesApi = {
   stats: (params?: { project_id?: number; date_from?: string; date_to?: string }) =>
     api.get<ExpenseStats>("/expenses/stats", { params }),
   get:     (id: number)         => api.get<Expense>(`/expenses/${id}`),
-  create:  (data: unknown)      => api.post<Expense>("/expenses", data),
+  create:  (data: {
+    expense_type?: "regular" | "reimbursement";
+    project_id?: number | null;
+    cost_code_id: number;
+    cost_centre_id?: number;
+    amount: number;
+    description: string;
+    vendor_name?: string;
+    reference_no?: string;
+    receipt_url?: string;
+  }) => api.post<Expense>("/expenses", data),
   update:  (id: number, data: unknown) => api.patch<Expense>(`/expenses/${id}`, data),
   submit:  (id: number, note?: string) => api.post<Expense>(`/expenses/${id}/submit`, { note }),
   verify:  (id: number, note?: string) => api.post<Expense>(`/expenses/${id}/verify`, { note }),
@@ -152,6 +189,19 @@ export const pettyCashReportsApi = {
   create: (data: unknown) => api.post<PettyCashReport>("/petty-cash-reports", data),
   update: (id: number, data: unknown) => api.patch<PettyCashReport>(`/petty-cash-reports/${id}`, data),
   post:   (id: number)    => api.post<PettyCashReport>(`/petty-cash-reports/${id}/post`),
+  export: (params?: { report_id?: number; date_from?: string; date_to?: string }) =>
+    api.get<Blob>("/petty-cash-reports/export", { params, responseType: "blob" }),
+};
+
+// ─── Reports ──────────────────────────────────────────────────────────────────
+
+export const reportsApi = {
+  payrollSummary: (year: number, month: number) =>
+    api.get<Blob>("/reports/payroll-summary", { params: { year, month }, responseType: "blob" }),
+  projectFinancial: (year?: number, status?: string) =>
+    api.get<Blob>("/reports/project-financial", { params: { year, status }, responseType: "blob" }),
+  pettyCashExport: (params?: { report_id?: number; date_from?: string; date_to?: string }) =>
+    api.get<Blob>("/petty-cash-reports/export", { params, responseType: "blob" }),
 };
 
 // ─── Vault ────────────────────────────────────────────────────────────────────
@@ -251,6 +301,7 @@ export const notificationsApi = {
 export const hrisDepartmentsApi = {
   list:   (activeOnly = true) =>
     api.get<Department[]>("/hris/departments", { params: { active_only: activeOnly } }),
+  tree:   () => api.get<DepartmentNode[]>("/hris/departments/tree"),
   create: (data: DepartmentCreate) => api.post<Department>("/hris/departments", data),
   update: (id: number, data: Partial<DepartmentCreate>) =>
     api.patch<Department>(`/hris/departments/${id}`, data),
@@ -294,13 +345,8 @@ export const hrisEmployeesApi = {
       { headers: { "Content-Type": "multipart/form-data" } }
     );
   },
-  registerFace: (id: number, photo: File) => {
-    const fd = new FormData();
-    fd.append("photo", photo);
-    return api.post<{ message: string }>(`/hris/employees/${id}/face`, fd, {
-      headers: { "Content-Type": "multipart/form-data" },
-    });
-  },
+  bulkCreateAccounts: (items: { employee_id: number; role_name: string }[]) =>
+    api.post<BulkAccountResponse>("/hris/employees/bulk-create-accounts", items),
 };
 
 // ─── HRIS H2 — Absensi & Cuti ─────────────────────────────────────────────────
@@ -308,6 +354,7 @@ export const hrisEmployeesApi = {
 export const hrisAttendanceApi = {
   list: (params?: {
     employee_id?: number; date_from?: string; date_to?: string;
+    dept_id?: number; work_group_id?: number;
     skip?: number; limit?: number;
   }) => api.get<PaginatedResponse<AttendanceRecord>>("/hris/attendance", { params }),
 
@@ -321,11 +368,11 @@ export const hrisAttendanceApi = {
   }) => api.post<AttendanceRecord>("/hris/attendance", data),
 
   clockIn: (payload: {
-    employee_id: number; latitude?: number; longitude?: number;
+    employee_id?: number; latitude?: number; longitude?: number;
     accuracy?: number; note?: string; selfie?: File;
   }) => {
     const fd = new FormData();
-    fd.append("employee_id", String(payload.employee_id));
+    if (payload.employee_id != null) fd.append("employee_id", String(payload.employee_id));
     if (payload.latitude  != null) fd.append("latitude",  String(payload.latitude));
     if (payload.longitude != null) fd.append("longitude", String(payload.longitude));
     if (payload.accuracy  != null) fd.append("accuracy",  String(payload.accuracy));
@@ -336,9 +383,62 @@ export const hrisAttendanceApi = {
     });
   },
 
-  clockOut: (params: {
-    employee_id: number; is_holiday?: boolean; is_weekend?: boolean; note?: string;
+  clockOut: (params?: {
+    employee_id?: number; is_holiday?: boolean; is_weekend?: boolean; note?: string;
   }) => api.post<AttendanceRecord>("/hris/attendance/clock-out", null, { params }),
+
+  export: (params?: {
+    date_from?: string; date_to?: string; dept_id?: number;
+    employee_id?: number; fmt?: "xlsx" | "csv";
+  }) => api.get("/hris/attendance/export", { params, responseType: "blob" }),
+
+  /** [DEBUG] Delete today's attendance record so clock-in can be re-tested */
+  debugResetToday: (employee_id?: number) =>
+    api.delete<{ detail: string }>("/hris/attendance/debug-reset", {
+      params: employee_id != null ? { employee_id } : undefined,
+    }),
+};
+
+// ─── HRIS — Work Locations ─────────────────────────────────────────────────────
+
+export const hrisWorkLocationApi = {
+  list: (active_only = true) =>
+    api.get<WorkLocation[]>("/hris/work-locations", { params: { active_only } }),
+
+  create: (data: {
+    name: string; location_type: string;
+    latitude: number; longitude: number;
+    radius_meters: number; is_active?: boolean;
+  }) => api.post<WorkLocation>("/hris/work-locations", data),
+
+  update: (id: number, data: Partial<{
+    name: string; location_type: string;
+    latitude: number; longitude: number;
+    radius_meters: number; is_active: boolean;
+  }>) => api.patch<WorkLocation>(`/hris/work-locations/${id}`, data),
+
+  assignToEmployee: (employeeId: number, workLocationId: number | null) =>
+    api.patch(`/hris/employees/${employeeId}/work-location`, null, {
+      params: { work_location_id: workLocationId },
+    }),
+};
+
+// ─── HRIS — Work Groups ────────────────────────────────────────────────────────
+
+export const hrisWorkGroupsApi = {
+  list: (params?: { role?: string; is_active?: boolean }) =>
+    api.get<WorkGroup[]>("/hris/work-groups", { params }),
+
+  create: (data: WorkGroupCreate) =>
+    api.post<WorkGroup>("/hris/work-groups", data),
+
+  update: (id: number, data: { name?: string; description?: string | null; is_active?: boolean }) =>
+    api.patch<WorkGroup>(`/hris/work-groups/${id}`, data),
+
+  assignEmployee: (employeeId: number, workGroupId: number | null) =>
+    api.patch(`/hris/employees/${employeeId}/work-group`, null, {
+      params: { work_group_id: workGroupId },
+    }),
 };
 
 export const hrisLeaveApi = {
@@ -395,7 +495,23 @@ export const hrisPayrollApi = {
   adjustRun: (id: number, data: Partial<{ gross_salary: number; thr_amount: number; pph21_method: string; cost_centre_id: number }>) =>
     api.patch<PayrollRun>(`/hris/payroll/runs/${id}`, data),
   getSlip: (id: number) =>
-    api.get<Record<string, unknown>>(`/hris/payroll/runs/${id}/slip`),
+    api.get<PayslipSlip>(`/hris/payroll/runs/${id}/slip`),
+  downloadSlipPdf: (id: number) =>
+    api.get<Blob>(`/hris/payroll/runs/${id}/slip.pdf`, { responseType: "blob" }),
+  postPeriod: (id: number) =>
+    api.post<PayrollPeriod>(`/hris/payroll/periods/${id}/post`),
+  exportBankCsv: (id: number, bank?: string) =>
+    api.get<Blob>(`/hris/payroll/periods/${id}/export/bank`, {
+      params: { bank },
+      responseType: "blob",
+    }),
+  exportBpjs: (id: number) =>
+    api.get<Blob>(`/hris/payroll/periods/${id}/export/bpjs`, { responseType: "blob" }),
+  exportForm1721: (employeeId: number, year?: number) =>
+    api.get<Blob>(`/hris/payroll/employees/${employeeId}/form-1721`, {
+      params: { year },
+      responseType: "blob",
+    }),
 };
 
 // ─── HRIS H4 — Recruitment ────────────────────────────────────────────────────
@@ -428,4 +544,79 @@ export const hrisRecruitmentApi = {
     api.patch<OnboardingTask>(`/hris/onboarding/tasks/${id}`, null, {
       params: { is_completed: is_completed ?? true },
     }),
+};
+
+// ─── HRIS Self-Service — /hris/me/* (worker / employee portal) ───────────────
+
+export const hrisMeApi = {
+  getProfile: () =>
+    api.get<MyProfile>("/hris/me"),
+  getAttendance: (year?: number, month?: number) =>
+    api.get<MyAttendanceResponse>("/hris/me/attendance", { params: { year, month } }),
+  getLeaveBalance: (year?: number) =>
+    api.get<MyLeaveBalance[]>("/hris/me/leave-balance", { params: { year } }),
+  getLeaveRequests: (status?: string) =>
+    api.get<MyLeaveRequest[]>("/hris/me/leave-requests", { params: { status } }),
+  getPayslips: () =>
+    api.get<MyPayslipSummary[]>("/hris/me/payslips"),
+  getPayslipDetail: (run_id: number) =>
+    api.get<MyPayslipDetail>(`/hris/me/payslips/${run_id}`),
+  // Feature 6: Enhancement Pack
+  getOvertimeRequests: () =>
+    api.get<OvertimeRequest[]>("/hris/me/overtime-requests"),
+  getDataChangeRequests: () =>
+    api.get<EmployeeDataChangeRequest[]>("/hris/me/data-change-requests"),
+  submitDataChangeRequest: (data: DataChangeRequestCreate) =>
+    api.post<EmployeeDataChangeRequest>("/hris/me/data-change-requests", data),
+  getDocuments: () =>
+    api.get<MyDocumentItem[]>("/hris/me/documents"),
+};
+
+// ─── HRIS Dashboard Stats (Feature 7) ────────────────────────────────────────
+
+export const hrisDashboardApi = {
+  getStats: (year?: number, month?: number) =>
+    api.get<HrisDashboardStats>("/hris/dashboard/stats", { params: { year, month } }),
+};
+
+// ─── HRIS Holiday Calendar (Feature 1) ───────────────────────────────────────
+
+export const hrisHolidayCalendarApi = {
+  list: (year?: number) =>
+    api.get<HolidayCalendar[]>("/hris/holiday-calendar", { params: { year } }),
+  create: (data: HolidayCalendarCreate) =>
+    api.post<HolidayCalendar>("/hris/holiday-calendar", data),
+  delete: (id: number) =>
+    api.delete<MessageResponse>(`/hris/holiday-calendar/${id}`),
+};
+
+// ─── HRIS Overtime Requests (Feature 6a) ─────────────────────────────────────
+
+export const hrisOvertimeApi = {
+  submit: (data: OvertimeRequestCreate) =>
+    api.post<OvertimeRequest>("/hris/overtime-requests", data),
+  list: (params?: { status?: string; employee_id?: number; date_from?: string; date_to?: string }) =>
+    api.get<OvertimeRequest[]>("/hris/overtime-requests", { params }),
+  approve: (id: number, note?: string) =>
+    api.post<OvertimeRequest>(`/hris/overtime-requests/${id}/approve`, { note }),
+  reject: (id: number, note?: string) =>
+    api.post<OvertimeRequest>(`/hris/overtime-requests/${id}/reject`, { note }),
+};
+
+// ─── HRIS Data Change Requests (Feature 6b) ──────────────────────────────────
+
+export const hrisDataChangeApi = {
+  list: (params?: { status?: string; employee_id?: number }) =>
+    api.get<EmployeeDataChangeRequest[]>("/hris/data-change-requests", { params }),
+  approve: (id: number, note?: string) =>
+    api.post<EmployeeDataChangeRequest>(`/hris/data-change-requests/${id}/approve`, { note }),
+  reject: (id: number, note?: string) =>
+    api.post<EmployeeDataChangeRequest>(`/hris/data-change-requests/${id}/reject`, { note }),
+};
+
+// ─── HRIS Leave Calendar (Feature 6c) ────────────────────────────────────────
+
+export const hrisLeaveCalendarApi = {
+  get: (params: { year: number; month: number; dept_id?: number }) =>
+    api.get<LeaveCalendarItem[]>("/hris/leave-requests/calendar", { params }),
 };

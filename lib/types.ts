@@ -4,7 +4,7 @@
 
 export type RoleName =
   | "SUPER_ADMIN" | "MD" | "PM"
-  | "COST_CONTROL" | "FINANCE" | "GA" | "STAFF";
+  | "COST_CONTROL" | "FINANCE" | "GA" | "STAFF" | "WORKER";
 
 export interface Role { id: number; name: RoleName; }
 
@@ -128,6 +128,8 @@ export type ExpenseStatus =
   | "draft" | "submitted" | "verified"
   | "approved" | "paid" | "hard_locked" | "rejected";
 
+export type ExpenseType = "regular" | "reimbursement";
+
 export interface ExpenseStats {
   total_logged: number;
   total_approved: number;
@@ -137,7 +139,8 @@ export interface ExpenseStats {
 
 export interface Expense {
   id: number;
-  project_id: number;
+  expense_type: ExpenseType;
+  project_id: number | null;
   cost_code_id: number;
   cost_centre_id: number | null;
   petty_cash_line_id: number | null;
@@ -150,6 +153,7 @@ export interface Expense {
   over_budget?: boolean | null;
   budget_remaining?: number | null;
   submitted_by: number | null;
+  receipt_reviewed_by: number | null;
   verified_by: number | null;
   approved_by: number | null;
   paid_by: number | null;
@@ -481,6 +485,7 @@ export interface Employee {
   bpjs_kes_no: string | null;
   user_id: number | null;
   photo_url: string | null;
+  ptkp_status: string | null;   // e.g. "TK/0", "K/1"
   department: Department | null;
   grade: JobGrade | null;
   user: { id: number; full_name: string } | null;
@@ -510,6 +515,22 @@ export interface EmployeeCreate {
   user_id?: number | null;
 }
 
+export interface BulkAccountResult {
+  employee_id:   number;
+  employee_no:   string;
+  full_name:     string;
+  status:        "created" | "skipped" | "error";
+  detail:        string;
+  temp_password: string | null;
+}
+
+export interface BulkAccountResponse {
+  created: number;
+  skipped: number;
+  errors:  number;
+  results: BulkAccountResult[];
+}
+
 export interface DepartmentCreate {
   code: string;
   name: string;
@@ -529,6 +550,20 @@ export interface JobGradeCreate {
 export type AttendanceSource = "manual" | "mobile" | "fingerprint" | "import";
 export type LeaveRequestStatus = "draft" | "submitted" | "approved" | "rejected";
 
+export type WorkLocationType = "home_office" | "site" | "other";
+
+export interface WorkLocation {
+  id: number;
+  name: string;
+  location_type: WorkLocationType;
+  latitude: number;
+  longitude: number;
+  radius_meters: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AttendanceRecord {
   id: number;
   employee_id: number;
@@ -544,12 +579,34 @@ export interface AttendanceRecord {
   latitude: number | null;
   longitude: number | null;
   accuracy: number | null;
+  location_ok: boolean | null;
+  location_distance_m: number | null;
+  matched_location_name: string | null;
+  matched_location_type: WorkLocationType | null;
   selfie_url: string | null;
   face_verified: boolean;
   face_confidence: number | null;
   note: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface WorkGroup {
+  id: number;
+  name: string;
+  role: RoleName;
+  description: string | null;
+  is_active: boolean;
+  members: { id: number; employee_no: string; full_name: string }[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkGroupCreate {
+  name: string;
+  role: RoleName;
+  description?: string | null;
+  is_active?: boolean;
 }
 
 export interface AttendanceSummaryItem {
@@ -582,6 +639,8 @@ export interface LeaveType {
   is_paid: boolean;
   requires_approval: boolean;
   is_active: boolean;
+  category: 'annual' | 'sick' | 'maternity' | 'paternity' | 'unpaid' | 'other';
+  requires_doctor_cert: boolean;
 }
 
 export interface LeaveTypeCreate {
@@ -625,7 +684,7 @@ export interface LeaveRequest {
 }
 
 export interface LeaveRequestCreate {
-  employee_id: number;
+  employee_id?: number;   // optional: server resolves from current user if omitted
   leave_type_id: number;
   start_date: string;
   end_date: string;
@@ -703,6 +762,24 @@ export interface PayrollRun {
   updated_at: string;
 }
 
+// Structured pay slip JSON (from GET /hris/payroll/runs/{id}/slip)
+export interface PayslipSlip {
+  period: string;           // "2025-01"
+  employee_no: string;
+  employee_name: string;
+  department: string | null;
+  gross_salary: number;
+  bpjs_tk_employee: number;
+  bpjs_tk_employer: number;
+  bpjs_kes_employee: number;
+  bpjs_kes_employer: number;
+  pph21_amount: number;
+  pph21_method: PPh21Method;
+  thr_amount: number | null;
+  net_salary: number;
+  components: Record<string, number>;
+}
+
 // ─── HRIS Types — Phase H4: Recruitment ──────────────────────────────────────
 
 export type PostingStatus = "OPEN" | "CLOSED" | "ON_HOLD";
@@ -773,4 +850,252 @@ export interface OnboardingTask {
   completed_at: string | null;
   assigned_to: number | null;
   sort_order: number;
+}
+
+// ─── HRIS Self-Service (employee portal) ──────────────────────────────────────
+
+export interface MyProfile {
+  id: number;
+  employee_no: string;
+  full_name: string;
+  email: string | null;
+  phone: string | null;
+  tipe: string;
+  status: string;
+  site: string | null;
+  join_date: string | null;
+  department: { id: number; name: string } | null;
+  grade: { id: number; name: string; level: number } | null;
+  bank_name: string | null;
+  bank_account: string | null;
+  photo_url: string | null;
+}
+
+export interface MyAttendanceRecord {
+  id: number;
+  date: string;
+  clock_in: string | null;
+  clock_out: string | null;
+  hours_regular: number;
+  hours_overtime_weekday: number;
+  hours_overtime_weekend: number;
+  hours_overtime_holiday: number;
+  source: string | null;
+  face_verified: boolean;
+  face_confidence: number | null;
+  selfie_url: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  matched_location_name: string | null;
+  matched_location_type: WorkLocationType | null;
+  note: string | null;
+}
+
+export interface MyAttendanceResponse {
+  year: number;
+  month: number;
+  employee_id: number;
+  today: MyAttendanceRecord | null;
+  clock_state: "not_clocked_in" | "clocked_in" | "clocked_out";
+  summary: { working_days: number; total_hours: number };
+  records: MyAttendanceRecord[];
+}
+
+export interface MyLeaveBalance {
+  leave_type_id: number;
+  code: string;
+  name: string;
+  is_paid: boolean;
+  max_days: number | null;
+  accrued: number;
+  used: number;
+  remaining: number;
+  year: number;
+}
+
+export interface MyLeaveRequest {
+  id: number;
+  leave_type: { id: number; name: string } | null;
+  start_date: string;
+  end_date: string;
+  days: number;
+  reason: string | null;
+  status: string;
+  submitted_at: string | null;
+  approval_history: { actor: string; action: string; note?: string; at: string }[];
+}
+
+export interface MyPayslipSummary {
+  run_id: number;
+  year: number;
+  month: number;
+  period_label: string;
+  gross_salary: number;
+  net_salary: number;
+  bpjs_tk_employee: number;
+  bpjs_kes_employee: number;
+  pph21_amount: number;
+  thr_amount: number | null;
+  pdf_url: string | null;
+  has_pdf: boolean;
+}
+
+export interface MyPayslipDetail extends MyPayslipSummary {
+  bpjs_tk_employer: number;
+  bpjs_kes_employer: number;
+  pph21_method: string | null;
+  employee: {
+    id: number;
+    employee_no: string;
+    full_name: string;
+    bank_name: string | null;
+    bank_account: string | null;
+  };
+  components: {
+    component_id: number;
+    component_name: string;
+    component_type: string | null;
+    amount: number;
+  }[];
+  pdf_url: string | null;
+}
+
+// ─── HRIS Enhancement Pack — Feature 8: Org Chart ────────────────────────────
+
+export interface DepartmentNode {
+  id: number;
+  code: string;
+  name: string;
+  parent_id: number | null;
+  is_active: boolean;
+  headcount: number;
+  open_positions: number;
+  children: DepartmentNode[];
+}
+
+// ─── HRIS Enhancement Pack — Feature 7: Dashboard Stats ──────────────────────
+
+export interface HeadcountTrendItem {
+  month: string;   // "2025-01"
+  count: number;
+}
+
+export interface PkwtAlertItem {
+  employee_id: number;
+  employee_no: string;
+  full_name: string;
+  end_date: string;
+  days_remaining: number;
+}
+
+export interface DeptAttendanceItem {
+  dept: string;
+  rate_pct: number;
+}
+
+export interface HrisDashboardStats {
+  total_employees: number;
+  active: number;
+  probation: number;
+  terminated_ytd: number;
+  hired_ytd: number;
+  headcount_trend: HeadcountTrendItem[];
+  pkwt_expiring_30d: number;
+  pkwt_expiring_60d: number;
+  pkwt_expiring_90d: number;
+  pkwt_expiring_list: PkwtAlertItem[];
+  leave_liability_days: number;
+  attendance_rate_pct: number;
+  dept_attendance: DeptAttendanceItem[];
+}
+
+// ─── HRIS Enhancement Pack — Feature 1: Holiday Calendar ─────────────────────
+
+export interface HolidayCalendar {
+  id: number;
+  date: string;          // YYYY-MM-DD
+  name: string;
+  is_national: boolean;
+  year: number;
+  created_at: string;
+}
+
+export interface HolidayCalendarCreate {
+  date: string;
+  name: string;
+  is_national?: boolean;
+}
+
+// ─── HRIS Enhancement Pack — Feature 6a: Overtime Requests ───────────────────
+
+export type OvertimeRequestStatus = "draft" | "submitted" | "approved" | "rejected";
+
+export interface OvertimeRequest {
+  id: number;
+  employee_id: number;
+  employee_name: string | null;
+  date: string;           // YYYY-MM-DD
+  planned_hours: number;
+  reason: string;
+  status: OvertimeRequestStatus;
+  approved_by: number | null;
+  approved_at: string | null;
+  rejection_reason: string | null;
+  attendance_id: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OvertimeRequestCreate {
+  date: string;
+  planned_hours: number;
+  reason: string;
+}
+
+// ─── HRIS Enhancement Pack — Feature 6b: Data Change Requests ────────────────
+
+export type DataChangeStatus = "pending" | "approved" | "rejected";
+
+export interface EmployeeDataChangeRequest {
+  id: number;
+  employee_id: number;
+  field_name: string;
+  old_value: string | null;
+  new_value: string;
+  reason: string | null;
+  status: DataChangeStatus;
+  reviewed_by: number | null;
+  reviewed_at: string | null;
+  review_note: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DataChangeRequestCreate {
+  field_name: string;
+  new_value: string;
+  reason?: string;
+}
+
+// ─── HRIS Enhancement Pack — Feature 6c: Leave Calendar ──────────────────────
+
+export interface LeaveCalendarItem {
+  employee_id: number;
+  employee_name: string;
+  dept: string;
+  leave_type: string;
+  start_date: string;
+  end_date: string;
+  days: number;
+  status: string;
+}
+
+// ─── HRIS Enhancement Pack — Feature 6d: My Documents ────────────────────────
+
+export interface MyDocumentItem {
+  doc_type: string;       // "payslip" | EmpDocType
+  name: string;
+  date: string;
+  file_url: string;
+  period_label: string | null;
 }

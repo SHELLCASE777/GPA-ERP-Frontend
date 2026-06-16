@@ -283,9 +283,8 @@ function DetailPanel({
   });
 
   function downloadPdf() {
-    const token = localStorage.getItem("gpa_token");
     const url = legalApi.pdfUrl(doc.id);
-    fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+    fetch(url, { credentials: "include" })
       .then((r) => {
         if (!r.ok) throw new Error(`PDF not available (${r.status})`);
         return r.blob();

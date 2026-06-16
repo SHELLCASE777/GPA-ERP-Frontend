@@ -2,8 +2,8 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  Banknote, Lock, Play, ChevronLeft, ChevronRight,
-  CheckCircle2, AlertCircle, Clock3, PlusCircle, Download,
+  Banknote, Lock, Play,
+  CheckCircle2, PlusCircle, Download, FileText,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -28,13 +28,33 @@ const STATUS_STYLE: Record<string, string> = {
   POSTED: "bg-teal-50 text-teal-700 border-teal-200",
 };
 
+/* ─── Blob download helper ───────────────────────────────────────────────── */
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a   = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+
 /* ─── Slip modal ─────────────────────────────────────────────────────────── */
 function SlipModal({ run, onClose }: { run: PayrollRun | null; onClose: () => void }) {
+  const [dlPdf, setDlPdf] = useState(false);
+
   const { data: slip, isLoading } = useQuery({
     queryKey: ["payslip", run?.id],
     queryFn:  () => hrisPayrollApi.getSlip(run!.id).then(r => r.data),
     enabled:  !!run,
   });
+
+  async function handlePdfDownload() {
+    if (!run) return;
+    setDlPdf(true);
+    try {
+      const res = await hrisPayrollApi.downloadSlipPdf(run.id);
+      downloadBlob(res.data, `slip-gaji-${run.id}.pdf`);
+    } finally { setDlPdf(false); }
+  }
 
   const row = (label: string, value: string, cls = "") => (
     <div className={cn("flex justify-between items-center py-1.5 border-b border-gray-50 text-sm", cls)}>
@@ -45,7 +65,17 @@ function SlipModal({ run, onClose }: { run: PayrollRun | null; onClose: () => vo
 
   return (
     <Modal open={!!run} onClose={onClose} title="Slip Gaji" size="md"
-      subtitle={slip ? `${slip.employee_name as string} · ${slip.period as string}` : undefined}>
+      subtitle={slip ? `${slip.employee_name as string} · ${slip.period as string}` : undefined}
+      footer={slip ? (
+        <div className="flex justify-end">
+          <Button size="sm" onClick={handlePdfDownload} disabled={dlPdf}
+            className="bg-orange-600 hover:bg-orange-700 text-white">
+            <FileText size={13} className="mr-1.5" />
+            {dlPdf ? "Mengunduh…" : "Download PDF"}
+          </Button>
+        </div>
+      ) : undefined}
+    >
       {isLoading ? (
         <div className="space-y-2">{Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-8" />)}</div>
       ) : slip ? (
@@ -268,6 +298,46 @@ export default function PayrollPage() {
     onSuccess:  () => qc.invalidateQueries({ queryKey: ["hris", "payroll", "runs", selectedPeriod?.id] }),
   });
 
+  const postMut = useMutation({
+    mutationFn: (id: number) => hrisPayrollApi.postPeriod(id),
+    onSuccess:  (res) => {
+      qc.invalidateQueries({ queryKey: ["hris", "payroll", "periods"] });
+      setSelectedPeriod(res.data);
+    },
+  });
+
+  const [exportingBank, setExportingBank] = useState(false);
+  async function handleBankExport(bank = "BCA") {
+    if (!selectedPeriod) return;
+    setExportingBank(true);
+    try {
+      const res = await hrisPayrollApi.exportBankCsv(selectedPeriod.id, bank);
+      const MONTHS_ID = ["","Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
+      downloadBlob(res.data, `payroll-${MONTHS_ID[selectedPeriod.month]}-${selectedPeriod.year}-${bank}.csv`);
+    } finally { setExportingBank(false); }
+  }
+
+  const [exportingBpjs, setExportingBpjs] = useState(false);
+  async function handleBpjsExport() {
+    if (!selectedPeriod) return;
+    setExportingBpjs(true);
+    try {
+      const res = await hrisPayrollApi.exportBpjs(selectedPeriod.id);
+      const MONTHS_ID = ["","Januari","Februari","Maret","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"];
+      downloadBlob(res.data, `bpjs-${MONTHS_ID[selectedPeriod.month]}-${selectedPeriod.year}.xlsx`);
+    } finally { setExportingBpjs(false); }
+  }
+
+  async function handleForm1721Export(employeeId: number, employeeName: string) {
+    try {
+      const year = selectedPeriod?.year ?? new Date().getFullYear();
+      const res = await hrisPayrollApi.exportForm1721(employeeId, year);
+      downloadBlob(res.data, `1721-A1-${employeeName.replace(/\s+/g, "-")}-${year}.xlsx`);
+    } catch {
+      // silently ignore
+    }
+  }
+
   // Summary for selected period
   const totalGross = runs.reduce((s, r) => s + r.gross_salary, 0);
   const totalNet   = runs.reduce((s, r) => s + r.net_salary,   0);
@@ -367,13 +437,32 @@ export default function PayrollPage() {
                       </>
                     )}
                     {selectedPeriod.status === "LOCKED" && (
-                      <Button size="sm" className="bg-teal-600 hover:bg-teal-700 text-white">
-                        <CheckCircle2 size={13} className="mr-1.5" /> Posting ke ERP
+                      <Button size="sm"
+                        onClick={() => postMut.mutate(selectedPeriod.id)}
+                        disabled={postMut.isPending}
+                        className="bg-teal-600 hover:bg-teal-700 text-white">
+                        <CheckCircle2 size={13} className="mr-1.5" />
+                        {postMut.isPending ? "Memposting…" : "Posting ke ERP"}
                       </Button>
                     )}
-                    <Button variant="ghost" size="sm" className="border border-gray-200">
-                      <Download size={13} className="mr-1.5" /> Export Bank CSV
-                    </Button>
+                    {(selectedPeriod.status === "LOCKED" || selectedPeriod.status === "POSTED") && (
+                      <>
+                        <Button variant="ghost" size="sm"
+                          onClick={() => handleBankExport("BCA")}
+                          disabled={exportingBank}
+                          className="border border-gray-200">
+                          <Download size={13} className="mr-1.5" />
+                          {exportingBank ? "Mengunduh…" : "Bank CSV"}
+                        </Button>
+                        <Button variant="ghost" size="sm"
+                          onClick={handleBpjsExport}
+                          disabled={exportingBpjs}
+                          className="border border-purple-200 text-purple-700 hover:bg-purple-50">
+                          <FileText size={13} className="mr-1.5" />
+                          {exportingBpjs ? "Mengunduh…" : "BPJS Excel"}
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </div>
               </Card>
@@ -401,7 +490,7 @@ export default function PayrollPage() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-gray-100">
-                        {["Karyawan","Gross","BPJS TK","BPJS Kes","PPh 21","THR","Net",""].map(h => (
+                        {["Karyawan","Gross","BPJS TK","BPJS Kes","PPh 21","THR","Net","Slip","1721-A1"].map(h => (
                           <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold text-gray-400 uppercase tracking-wide whitespace-nowrap">
                             {h}
                           </th>
@@ -411,14 +500,14 @@ export default function PayrollPage() {
                     <tbody className="divide-y divide-gray-50">
                       {runLoad
                         ? Array.from({ length: 5 }).map((_, i) => (
-                            <tr key={i}>{Array.from({ length: 8 }).map((_, j) => (
+                            <tr key={i}>{Array.from({ length: 9 }).map((_, j) => (
                               <td key={j} className="px-4 py-3"><Skeleton className="h-4 w-20" /></td>
                             ))}</tr>
                           ))
                         : runs.length === 0
                           ? (
                               <tr>
-                                <td colSpan={8} className="px-4 py-12 text-center text-sm text-gray-400">
+                                <td colSpan={9} className="px-4 py-12 text-center text-sm text-gray-400">
                                   Klik <strong>Hitung</strong> untuk menjalankan kalkulasi payroll
                                 </td>
                               </tr>
@@ -439,6 +528,17 @@ export default function PayrollPage() {
                                   <button onClick={() => setSlipRun(r)}
                                     className="text-xs text-orange-600 hover:text-orange-800 font-medium underline">
                                     Slip
+                                  </button>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <button
+                                    onClick={() => handleForm1721Export(
+                                      r.employee_id,
+                                      r.employee?.full_name ?? String(r.employee_id)
+                                    )}
+                                    className="text-xs text-purple-600 hover:text-purple-800 font-medium underline"
+                                    title="Unduh Form 1721-A1 tahunan">
+                                    1721-A1
                                   </button>
                                 </td>
                               </tr>

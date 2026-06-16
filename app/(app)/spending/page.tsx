@@ -6,7 +6,7 @@ import {
   Plus, Search, Filter, SlidersHorizontal, ChevronUp, ChevronDown,
   ChevronLeft, ChevronRight, MoreHorizontal, CheckCircle2, Send,
   XCircle, ArrowDownUp, ClipboardList, FileSpreadsheet, Copy, Printer,
-  History,
+  History, Receipt,
 } from "lucide-react";
 import { expensesApi, pettyCashReportsApi, projectsApi } from "@/lib/api";
 import {
@@ -23,6 +23,7 @@ import ExpenseVoucherModal from "./components/expense-voucher-modal";
 import { ApprovalTimeline } from "./components/approval-timeline";
 import { toastSuccess, toastError } from "@/lib/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { useRole } from "@/lib/auth-context";
 import type { Expense, ExpenseStatus } from "@/lib/types";
 
 type SortKey   = "id" | "amount" | "created_at" | "status";
@@ -39,17 +40,35 @@ const STATUS_OPTIONS: { label: string; value: ExpenseStatus | "" }[] = [
   { label: "Rejected",      value: "rejected" },
 ];
 
+// ── Expense type badge ────────────────────────────────────────────────────────
+function ExpenseTypeBadge({ type }: { type?: string }) {
+  if (type === "reimbursement") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 border border-amber-200 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+        <Receipt size={9} /> Reimb.
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 rounded-md bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold text-gray-500">
+      Regular
+    </span>
+  );
+}
+
 // ── Action menu ───────────────────────────────────────────────────────────────
 function ActionMenu({
   expense,
   onRefresh,
   onDuplicate,
   onPrintVoucher,
+  isSelfService,
 }: {
   expense: Expense;
   onRefresh: () => void;
   onDuplicate: (expense: Expense) => void;
   onPrintVoucher: (expense: Expense) => void;
+  isSelfService: boolean;
 }) {
   const [open,           setOpen]           = useState(false);
   const [historyOpen,    setHistoryOpen]    = useState(false);
@@ -64,7 +83,7 @@ function ActionMenu({
     enabled:  false,
   });
 
-  function useAction(fn: () => Promise<unknown>, successMsg: string) {
+  function makeAction(fn: () => Promise<unknown>, successMsg: string) {
     return async () => {
       try { await fn(); toastSuccess(successMsg); onRefresh(); }
       catch (e) { toastError("Action failed", getErrorMessage(e)); }
@@ -73,10 +92,11 @@ function ActionMenu({
   }
 
   const canSubmit  = expense.status === "draft" || expense.status === "rejected";
-  const canVerify  = expense.status === "submitted";
-  const canApprove = expense.status === "submitted" || expense.status === "verified";
-  const canPay     = expense.status === "approved";
-  const canReject  = !["paid","hard_locked","rejected"].includes(expense.status);
+  // Self-service users (STAFF/WORKER) can only submit — they cannot verify, approve, or pay
+  const canVerify  = !isSelfService && expense.status === "submitted";
+  const canApprove = !isSelfService && (expense.status === "submitted" || expense.status === "verified");
+  const canPay     = !isSelfService && expense.status === "approved";
+  const canReject  = !isSelfService && !["paid","hard_locked","rejected"].includes(expense.status);
 
   return (
     <div className="relative">
@@ -92,7 +112,7 @@ function ActionMenu({
           <div className="absolute right-0 top-7 z-20 bg-white border border-gray-100 rounded-xl shadow-modal w-48 py-1 overflow-hidden">
             {canSubmit && (
               <button
-                onClick={useAction(() => expensesApi.submit(expense.id), "Expense submitted")}
+                onClick={makeAction(() => expensesApi.submit(expense.id), "Expense submitted")}
                 className="flex items-center gap-2 w-full px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 transition-colors"
               >
                 <Send size={12} className="text-blue-500" /> Submit for approval
@@ -100,7 +120,7 @@ function ActionMenu({
             )}
             {canVerify && (
               <button
-                onClick={useAction(() => expensesApi.verify(expense.id), "Expense verified")}
+                onClick={makeAction(() => expensesApi.verify(expense.id), "Expense verified")}
                 className="flex items-center gap-2 w-full px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 transition-colors"
               >
                 <CheckCircle2 size={12} className="text-cyan-500" /> Verify
@@ -108,7 +128,7 @@ function ActionMenu({
             )}
             {canApprove && (
               <button
-                onClick={useAction(() => expensesApi.approve(expense.id), "Expense approved")}
+                onClick={makeAction(() => expensesApi.approve(expense.id), "Expense approved")}
                 className="flex items-center gap-2 w-full px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 transition-colors"
               >
                 <CheckCircle2 size={12} className="text-green-500" /> Approve
@@ -116,7 +136,7 @@ function ActionMenu({
             )}
             {canPay && (
               <button
-                onClick={useAction(() => expensesApi.pay(expense.id), "Marked as paid")}
+                onClick={makeAction(() => expensesApi.pay(expense.id), "Marked as paid")}
                 className="flex items-center gap-2 w-full px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 transition-colors"
               >
                 <CheckCircle2 size={12} className="text-purple-500" /> Mark paid
@@ -176,7 +196,7 @@ function ActionMenu({
               <>
                 <div className="my-1 border-t border-gray-100" />
                 <button
-                  onClick={useAction(
+                  onClick={makeAction(
                     () => expensesApi.reject(expense.id, "Rejected via action menu"),
                     "Expense rejected"
                   )}
@@ -224,6 +244,7 @@ export default function SpendingPage() {
   const qc           = useQueryClient();
   const router       = useRouter();
   const searchParams = useSearchParams();
+  const { isSelfService } = useRole();
   const [newOpen,       setNewOpen]      = useState(false);
   const [pettyOpen,     setPettyOpen]    = useState(false);
   const [voucherExpense,setVoucherExpense] = useState<Expense | null>(null);
@@ -245,13 +266,15 @@ export default function SpendingPage() {
   const duplicateMutation = useMutation({
     mutationFn: (expense: Expense) =>
       expensesApi.create({
-        project_id:     expense.project_id,
+        expense_type:   expense.expense_type ?? "regular",
+        project_id:     expense.project_id ?? undefined,
         cost_code_id:   expense.cost_code_id,
         cost_centre_id: expense.cost_centre_id ?? undefined,
         amount:         expense.amount,
         description:    expense.description,
         vendor_name:    expense.vendor_name ?? undefined,
         reference_no:   expense.reference_no ?? undefined,
+        receipt_url:    expense.receipt_url ?? undefined,
       }),
     onSuccess: () => {
       toastSuccess("Duplicated successfully");
@@ -273,6 +296,7 @@ export default function SpendingPage() {
   const { data: projects = [] } = useQuery({
     queryKey: ["projects"],
     queryFn:  () => projectsApi.list({ limit: 200 }).then((r) => r.data.items),
+    enabled:  !isSelfService,   // STAFF/WORKER have no project_command access
   });
 
   const { data: pettyReports = [] } = useQuery({
@@ -282,6 +306,7 @@ export default function SpendingPage() {
         ...(projectFilter ? { project_id: Number(projectFilter) } : {}),
         limit: 20,
       }).then((r) => r.data),
+    enabled: !isSelfService,
   });
 
   const { data: stats } = useQuery({
@@ -289,6 +314,7 @@ export default function SpendingPage() {
     queryFn: () =>
       expensesApi.stats(projectFilter ? { project_id: Number(projectFilter) } : undefined)
         .then((r) => r.data),
+    enabled: !isSelfService,
   });
 
   // Client-side sort + search
@@ -333,44 +359,66 @@ export default function SpendingPage() {
       {/* ── Header ────────────────────────────────────────────────────────── */}
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold text-gray-900">Spending</h1>
+          <h1 className="text-xl font-bold text-gray-900">
+            {isSelfService ? "Reimbursement Saya" : "Spending"}
+          </h1>
           <p className="text-sm text-gray-400 mt-0.5">
-            Expenses & Petty Cash · {allExpenses.length} records
+            {isSelfService
+              ? `${allExpenses.length} pengajuan reimbursement`
+              : `Expenses & Petty Cash · ${allExpenses.length} records`
+            }
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            variant="secondary"
-            icon={<ClipboardList size={13} />}
-            onClick={() => setPettyOpen(true)}
-          >
-            Petty Cash Report
-          </Button>
+          {!isSelfService && (
+            <Button
+              variant="secondary"
+              icon={<ClipboardList size={13} />}
+              onClick={() => setPettyOpen(true)}
+            >
+              Petty Cash Report
+            </Button>
+          )}
           <Button
             variant="primary"
-            icon={<Plus size={13} />}
+            icon={isSelfService ? <Receipt size={13} /> : <Plus size={13} />}
             onClick={() => setNewOpen(true)}
           >
-            New Expense
+            {isSelfService ? "Ajukan Reimbursement" : "New Expense"}
           </Button>
         </div>
       </div>
 
-      {/* ── Summary strip ─────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-3 gap-3">
-        {[
-          { label: "Total Logged",       value: formatCurrency(stats?.total_logged ?? 0),   color: "text-gray-900" },
-          { label: "Approved / Paid",     value: formatCurrency(stats?.total_approved ?? 0), color: "text-green-600" },
-          { label: "Petty Cash Batches",  value: `${pettyReports.length} · ${formatCurrency(pettyTotal)}`, color: "text-blue-600" },
-        ].map((s) => (
-          <div key={s.label} className="bg-white border border-gray-100 rounded-xl px-4 py-3 shadow-card">
-            <p className="text-[10px] font-semibold tracking-widest text-gray-400 uppercase">{s.label}</p>
-            <p className={`num text-lg font-bold mt-1 ${s.color}`}>{s.value}</p>
+      {/* ── Self-service info banner ───────────────────────────────────────── */}
+      {isSelfService && (
+        <div className="flex items-start gap-2.5 rounded-xl bg-amber-50 border border-amber-200 px-3.5 py-3">
+          <Receipt size={14} className="text-amber-500 mt-0.5 shrink-0" />
+          <div className="text-xs text-amber-800 leading-relaxed">
+            <p className="font-semibold mb-0.5">Hanya pengajuan kamu yang ditampilkan</p>
+            <p className="text-amber-700">
+              Alur persetujuan: Kamu submit → GA verifikasi bukti → Cost Control → Finance setujui &amp; bayar
+            </p>
           </div>
-        ))}
-      </div>
+        </div>
+      )}
 
-      {pettyReports.length > 0 && (
+      {/* ── Summary strip (not shown for self-service) ────────────────────── */}
+      {!isSelfService && (
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            { label: "Total Logged",       value: formatCurrency(stats?.total_logged ?? 0),   color: "text-gray-900" },
+            { label: "Approved / Paid",     value: formatCurrency(stats?.total_approved ?? 0), color: "text-green-600" },
+            { label: "Petty Cash Batches",  value: `${pettyReports.length} · ${formatCurrency(pettyTotal)}`, color: "text-blue-600" },
+          ].map((s) => (
+            <div key={s.label} className="bg-white border border-gray-100 rounded-xl px-4 py-3 shadow-card">
+              <p className="text-[10px] font-semibold tracking-widest text-gray-400 uppercase">{s.label}</p>
+              <p className={`num text-lg font-bold mt-1 ${s.color}`}>{s.value}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!isSelfService && pettyReports.length > 0 && (
         <div className="bg-white border border-gray-100 rounded-xl px-4 py-3 shadow-card">
           <div className="flex items-center justify-between gap-3 mb-3">
             <div className="flex items-center gap-2">
@@ -420,17 +468,19 @@ export default function SpendingPage() {
           ))}
         </select>
 
-        {/* Project filter */}
-        <select
-          value={projectFilter}
-          onChange={(e) => { setProject(e.target.value ? Number(e.target.value) : ""); setPage(1); }}
-          className="text-xs border border-gray-200 bg-white rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer text-gray-600 max-w-[180px]"
-        >
-          <option value="">All Projects</option>
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>{p.code}</option>
-          ))}
-        </select>
+        {/* Project filter — hidden for self-service (they have no projects) */}
+        {!isSelfService && (
+          <select
+            value={projectFilter}
+            onChange={(e) => { setProject(e.target.value ? Number(e.target.value) : ""); setPage(1); }}
+            className="text-xs border border-gray-200 bg-white rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer text-gray-600 max-w-[180px]"
+          >
+            <option value="">All Projects</option>
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>{p.code}</option>
+            ))}
+          </select>
+        )}
 
         <div className="ml-auto text-xs text-gray-400 num">
           {filtered.length} result{filtered.length !== 1 ? "s" : ""}
@@ -443,25 +493,30 @@ export default function SpendingPage() {
           <TableSkeleton rows={8} cols={7} />
         ) : (
           <>
+          <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-gray-100">
                   <SortTh label="#"        field="id"         sort={sortKey} dir={sortDir} onSort={toggleSort} />
-                  <th className="th">Project</th>
+                  {!isSelfService && <th className="th">Type</th>}
+                  {!isSelfService && <th className="th">Project</th>}
                   <th className="th">Description</th>
                   <th className="th hidden md:table-cell">Cost Code</th>
                   <SortTh label="Amount"   field="amount"     sort={sortKey} dir={sortDir} onSort={toggleSort} />
                   <SortTh label="Status"   field="status"     sort={sortKey} dir={sortDir} onSort={toggleSort} />
                   <SortTh label="Date"     field="created_at" sort={sortKey} dir={sortDir} onSort={toggleSort} />
-                  <th className="th hidden lg:table-cell">Approver</th>
+                  {!isSelfService && <th className="th hidden lg:table-cell">Approver</th>}
                   <th className="th" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {pageRows.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="td text-center text-gray-400 py-14">
-                      No expenses match your filters
+                    <td colSpan={isSelfService ? 7 : 9} className="td text-center text-gray-400 py-14">
+                      {isSelfService
+                        ? "Belum ada pengajuan reimbursement"
+                        : "No expenses match your filters"
+                      }
                     </td>
                   </tr>
                 ) : (
@@ -474,11 +529,18 @@ export default function SpendingPage() {
                       )}
                     >
                       <td className="td num text-gray-400 text-xs">#{exp.id}</td>
-                      <td className="td">
-                        <span className="num text-xs font-semibold text-gray-500">
-                          {projects.find((p) => p.id === exp.project_id)?.code ?? "—"}
-                        </span>
-                      </td>
+                      {!isSelfService && (
+                        <td className="td">
+                          <ExpenseTypeBadge type={exp.expense_type} />
+                        </td>
+                      )}
+                      {!isSelfService && (
+                        <td className="td">
+                          <span className="num text-xs font-semibold text-gray-500">
+                            {projects.find((p) => p.id === exp.project_id)?.code ?? "—"}
+                          </span>
+                        </td>
+                      )}
                       <td className="td max-w-[180px]">
                         <p className="text-sm font-medium text-gray-900 truncate">
                           {exp.description}
@@ -500,16 +562,19 @@ export default function SpendingPage() {
                       <td className="td text-xs text-gray-400 hidden md:table-cell num whitespace-nowrap">
                         {fmtDateTime(exp.created_at)}
                       </td>
-                      <td className="td hidden lg:table-cell">
-                        {exp.current_approver_role ? (
-                          <ApproverPill role={exp.current_approver_role} />
-                        ) : (
-                          <span className="text-xs text-gray-300">—</span>
-                        )}
-                      </td>
+                      {!isSelfService && (
+                        <td className="td hidden lg:table-cell">
+                          {exp.current_approver_role ? (
+                            <ApproverPill role={exp.current_approver_role} />
+                          ) : (
+                            <span className="text-xs text-gray-300">—</span>
+                          )}
+                        </td>
+                      )}
                       <td className="td">
                         <ActionMenu
                           expense={exp}
+                          isSelfService={isSelfService}
                           onRefresh={() => qc.invalidateQueries({ queryKey: ["expenses"] })}
                           onDuplicate={(e) => duplicateMutation.mutate(e)}
                           onPrintVoucher={(e) => setVoucherExpense(e)}
@@ -520,6 +585,7 @@ export default function SpendingPage() {
                 )}
               </tbody>
             </table>
+          </div>
 
             {/* Pagination */}
             {totalPages > 1 && (
@@ -571,11 +637,11 @@ export default function SpendingPage() {
         onClick={() => setNewOpen(true)}
         className="fixed bottom-6 right-6 w-12 h-12 bg-gray-900 hover:bg-gray-800 text-white rounded-full shadow-lg flex items-center justify-center transition-all hover:scale-105 active:scale-95 sm:hidden z-30"
       >
-        <Plus size={20} />
+        {isSelfService ? <Receipt size={18} /> : <Plus size={20} />}
       </button>
 
       <NewExpenseModal open={newOpen} onClose={() => setNewOpen(false)} />
-      <PettyCashReportModal open={pettyOpen} onClose={() => setPettyOpen(false)} />
+      {!isSelfService && <PettyCashReportModal open={pettyOpen} onClose={() => setPettyOpen(false)} />}
       <ExpenseVoucherModal
         open={!!voucherExpense}
         onClose={() => setVoucherExpense(null)}

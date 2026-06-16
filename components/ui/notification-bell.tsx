@@ -89,12 +89,12 @@ export function NotificationBell() {
       {/* ── Bell button ── */}
       <button
         onClick={() => setOpen((v) => !v)}
-        className="relative p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
+        className="relative p-2 text-[#5E7186] hover:text-[#0C2138] hover:bg-[#F8FAF9] rounded-lg transition-colors"
         aria-label="Notifikasi"
       >
         <Bell size={16} />
         {unreadCount > 0 && (
-          <span className="absolute top-1 right-1 min-w-[16px] h-4 flex items-center justify-center bg-red-500 text-white text-[9px] font-bold rounded-full px-0.5 leading-none">
+          <span className="absolute top-1 right-1 min-w-[16px] h-4 flex items-center justify-center bg-[#F2B713] text-[#021B33] text-[9px] font-bold rounded-full px-0.5 leading-none">
             {unreadCount > 99 ? "99+" : unreadCount}
           </span>
         )}
@@ -102,16 +102,16 @@ export function NotificationBell() {
 
       {/* ── Dropdown panel ── */}
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-80 max-h-96 flex flex-col bg-white border border-gray-100 rounded-xl shadow-xl z-50 overflow-hidden">
+        <div className="absolute right-0 top-full mt-2 w-80 max-h-96 flex flex-col bg-white border border-[#E7E5DF] rounded-xl shadow-modal z-50 overflow-hidden">
           {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 shrink-0">
-            <span className="text-sm font-semibold text-gray-800">Notifikasi</span>
+          <div className="flex items-center justify-between px-4 py-3 border-b border-[#E7E5DF] shrink-0">
+            <span className="text-[13px] font-semibold text-[#0C2138]">Notifikasi</span>
             <div className="flex items-center gap-2">
               {unreadCount > 0 && (
                 <button
                   onClick={() => markAllRead.mutate()}
                   disabled={markAllRead.isPending}
-                  className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 font-medium disabled:opacity-50"
+                  className="flex items-center gap-1 text-[11px] text-[#06294A] hover:text-[#021B33] font-semibold disabled:opacity-50"
                 >
                   <Check size={11} />
                   Baca semua
@@ -119,7 +119,7 @@ export function NotificationBell() {
               )}
               <button
                 onClick={() => setOpen(false)}
-                className="text-gray-400 hover:text-gray-600 p-0.5 rounded"
+                className="text-[#94A3B8] hover:text-[#0C2138] p-0.5 rounded transition-colors"
               >
                 <X size={14} />
               </button>
@@ -131,13 +131,13 @@ export function NotificationBell() {
             {isLoading ? (
               /* Loading spinner */
               <div className="flex items-center justify-center py-10">
-                <div className="w-5 h-5 border-2 border-gray-200 border-t-blue-500 rounded-full animate-spin" />
+                <div className="w-5 h-5 border-2 border-[#E7E5DF] border-t-[#06294A] rounded-full animate-spin" />
               </div>
             ) : !notifications || notifications.length === 0 ? (
               /* Empty state */
-              <div className="flex flex-col items-center justify-center py-10 gap-2 text-gray-400">
+              <div className="flex flex-col items-center justify-center py-10 gap-2 text-[#94A3B8]">
                 <Bell size={24} className="opacity-40" />
-                <p className="text-xs">Belum ada notifikasi</p>
+                <p className="text-[11px]">Belum ada notifikasi</p>
               </div>
             ) : (
               /* Notification list */
@@ -147,24 +147,24 @@ export function NotificationBell() {
                     <button
                       onClick={() => handleNotificationClick(notif)}
                       className={[
-                        "w-full text-left px-4 py-3 flex flex-col gap-0.5 hover:bg-gray-50 transition-colors border-b border-gray-50",
+                        "w-full text-left px-4 py-3 flex flex-col gap-0.5 hover:bg-[#F8FAF9] transition-colors border-b border-[#F0EFEA]",
                         !notif.is_read
-                          ? "border-l-2 border-l-blue-500 bg-blue-50/30"
+                          ? "border-l-2 border-l-[#06294A] bg-[#EEF3F8]"
                           : "border-l-2 border-l-transparent bg-white",
                       ].join(" ")}
                     >
                       <span
                         className={[
-                          "text-sm leading-snug",
-                          !notif.is_read ? "font-semibold text-gray-900" : "font-medium text-gray-700",
+                          "text-[12.5px] leading-snug",
+                          !notif.is_read ? "font-semibold text-[#0C2138]" : "font-medium text-[#33445A]",
                         ].join(" ")}
                       >
                         {notif.title}
                       </span>
-                      <span className="text-xs text-gray-500 leading-snug line-clamp-2">
+                      <span className="text-[11px] text-[#5E7186] leading-snug line-clamp-2">
                         {notif.body}
                       </span>
-                      <span className="text-[10px] text-gray-400 mt-0.5">
+                      <span className="text-[10px] text-[#94A3B8] mt-0.5">
                         {relativeTime(notif.created_at)}
                       </span>
                     </button>
